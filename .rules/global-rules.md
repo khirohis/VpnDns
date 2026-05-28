@@ -18,7 +18,7 @@ Android の `VpnService` を利用し、DNS 制御を行うアプリケーショ
 ## 実装ガイドライン
 
 ### 1. VpnService 実装
-- **Foreground Service**: Android 14 以降の制約に従い、`AndroidManifest.xml` で `android:foregroundServiceType="vpn"` を必ず指定すること。
+- **Foreground Service**: Android 14 以降の制約に従い、`AndroidManifest.xml` で `android:foregroundServiceType="specialUse"` を指定し、適切な権限とプロパティを記述すること。
 - **Lifecycle**: VPN の接続状態を UI や他のコンポーネントが監視できるよう、接続状態は `StateFlow` 等で公開する。
 - **Resource Management**: 
     - VPN 接続時はバッテリー消費に配慮し、不要なループやリソース保持を避ける。
