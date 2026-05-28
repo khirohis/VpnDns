@@ -18,7 +18,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,7 +30,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import net.hogelab.android.vpndns.service.DnsVpnService
+import net.hogelab.android.vpndns.ui.Screen
+import net.hogelab.android.vpndns.ui.blacklist.BlacklistScreen
+import net.hogelab.android.vpndns.ui.bottomNavItems
+import net.hogelab.android.vpndns.ui.history.HistoryScreen
 import net.hogelab.android.vpndns.ui.theme.VpnDnsTheme
 
 class MainActivity : ComponentActivity() {
@@ -36,13 +49,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             VpnDnsTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    VpnControlScreen(
-                        modifier = Modifier.padding(innerPadding),
-                        onStartVpn = { prepareAndStartVpn() },
-                        onStopVpn = { stopVpn() }
-                    )
-                }
+                MainScreen(
+                    onStartVpn = { prepareAndStartVpn() },
+                    onStopVpn = { stopVpn() }
+                )
             }
         }
     }
@@ -80,6 +90,71 @@ class MainActivity : ComponentActivity() {
             action = "STOP"
         }
         startService(intent)
+    }
+}
+
+@Composable
+fun MainScreen(
+    onStartVpn: () -> Unit,
+    onStopVpn: () -> Unit
+) {
+    val navController = rememberNavController()
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                val navBackStackEntry by navController.currentBackStackEntryAsState()
+                val currentDestination = navBackStackEntry?.destination
+                bottomNavItems.forEach { screen ->
+                    NavigationBarItem(
+                        icon = { Icon(screen.icon, contentDescription = null) },
+                        label = { Text(screen.title) },
+                        selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
+                        onClick = {
+                            navController.navigate(screen.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    ) { innerPadding ->
+        NavHost(
+            navController = navController,
+            startDestination = Screen.Home.route,
+            modifier = Modifier.padding(innerPadding)
+        ) {
+            composable(Screen.Home.route) {
+                VpnControlScreen(
+                    onStartVpn = onStartVpn,
+                    onStopVpn = onStopVpn
+                )
+            }
+            composable(Screen.History.route) {
+                HistoryScreen()
+            }
+            composable(Screen.Blacklist.route) {
+                BlacklistScreen()
+            }
+            composable(Screen.Settings.route) {
+                PlaceholderScreen(Screen.Settings.title)
+            }
+        }
+    }
+}
+
+@Composable
+fun PlaceholderScreen(title: String) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(text = title, style = MaterialTheme.typography.headlineLarge)
     }
 }
 
