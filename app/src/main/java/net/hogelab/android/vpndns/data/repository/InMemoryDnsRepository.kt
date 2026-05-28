@@ -1,0 +1,118 @@
+package net.hogelab.android.vpndns.data.repository
+
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import net.hogelab.android.vpndns.domain.model.BlacklistEntry
+import net.hogelab.android.vpndns.domain.model.DnsEntry
+import net.hogelab.android.vpndns.domain.model.HistorySortConfig
+import net.hogelab.android.vpndns.domain.model.SortField
+import net.hogelab.android.vpndns.domain.model.SortOrder
+import net.hogelab.android.vpndns.domain.repository.DnsRepository
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * メモリ上で DNS 履歴とブラックリストを統合管理するリポジトリの実装
+ */
+class InMemoryDnsRepository : DnsRepository {
+
+    private val repositoryScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // 履歴の「素」のデータ
+    private val historyMap = ConcurrentHashMap<String, DnsEntry>()
+    private val _rawHistory = MutableStateFlow<Map<String, DnsEntry>>(emptyMap())
+
+    // ブラックリストのデータ
+    private val blockedMap = ConcurrentHashMap<String, BlacklistEntry>()
+    private val _rawBlacklist = MutableStateFlow<List<BlacklistEntry>>(emptyList())
+
+    private val _sortConfig = MutableStateFlow(HistorySortConfig())
+    override val sortConfig: StateFlow<HistorySortConfig> = _sortConfig.asStateFlow()
+
+    // ブラックリスト (StateFlow)
+    override val blacklist: StateFlow<List<BlacklistEntry>> = _rawBlacklist.asStateFlow()
+
+    // 履歴 (StateFlow): 履歴データ、ブラックリスト、ソート設定を結合して生成
+    override val history: StateFlow<List<DnsEntry>> = combine(
+        _rawHistory,
+        blacklist,
+        sortConfig
+    ) { rawMap, blockedList, sort ->
+        val blockedHosts = blockedList.map { it.hostName }.toSet()
+        rawMap.values.map { entry ->
+            entry.copy(isBlocked = blockedHosts.contains(entry.hostName))
+        }.sortedWith { a, b ->
+            val result = when (sort.field) {
+                SortField.FIRST_SEEN -> a.firstSeen.compareTo(b.firstSeen)
+                SortField.LAST_SEEN -> a.lastSeen.compareTo(b.lastSeen)
+                SortField.REQUEST_COUNT -> a.requestCount.compareTo(b.requestCount)
+                SortField.HOST_NAME -> a.hostName.compareTo(b.hostName, ignoreCase = true)
+            }
+            if (sort.order == SortOrder.ASCENDING) result else -result
+        }
+    }.stateIn(repositoryScope, SharingStarted.Eagerly, emptyList())
+
+    override fun addHistory(host: String) {
+        val now = System.currentTimeMillis()
+        val existing = historyMap[host]
+        
+        if (existing != null) {
+            historyMap[host] = existing.copy(
+                lastSeen = now,
+                requestCount = existing.requestCount + 1
+            )
+        } else {
+            historyMap[host] = DnsEntry(
+                hostName = host,
+                firstSeen = now,
+                lastSeen = now,
+                requestCount = 1
+            )
+        }
+        _rawHistory.value = historyMap.toMap()
+    }
+
+    override fun clearHistory() {
+        historyMap.clear()
+        _rawHistory.value = emptyMap()
+    }
+
+    override fun addToBlacklist(hostName: String) {
+        if (blockedMap.containsKey(hostName)) return
+        
+        blockedMap[hostName] = BlacklistEntry(
+            hostName = hostName,
+            addedAt = System.currentTimeMillis()
+        )
+        updateBlacklist()
+    }
+
+    override fun removeFromBlacklist(hostName: String) {
+        if (blockedMap.remove(hostName) != null) {
+            updateBlacklist()
+        }
+    }
+
+    override fun isBlocked(hostName: String): Boolean {
+        return blockedMap.containsKey(hostName)
+    }
+
+    override fun clearBlacklist() {
+        blockedMap.clear()
+        updateBlacklist()
+    }
+
+    override fun setSortConfig(config: HistorySortConfig) {
+        _sortConfig.value = config
+    }
+
+    private fun updateBlacklist() {
+        _rawBlacklist.value = blockedMap.values.toList().sortedByDescending { it.addedAt }
+    }
+}

@@ -4,18 +4,18 @@ import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.StateFlow
 import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.domain.model.BlacklistEntry
-import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
+import net.hogelab.android.vpndns.domain.repository.DnsRepository
 
 class BlacklistViewModel(
-    private val repository: BlacklistRepository = RepositoryProvider.blacklistRepository
+    private val repository: DnsRepository = RepositoryProvider.dnsRepository
 ) : ViewModel() {
-    val entries: StateFlow<List<BlacklistEntry>> = repository.entries
+    val entries: StateFlow<List<BlacklistEntry>> = repository.blacklist
 
     fun removeEntry(hostName: String) {
-        repository.remove(hostName)
+        repository.removeFromBlacklist(hostName)
     }
 
     fun clearAll() {
-        repository.clear()
+        repository.clearBlacklist()
     }
 }
