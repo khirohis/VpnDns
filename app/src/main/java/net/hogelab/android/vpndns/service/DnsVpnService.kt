@@ -20,7 +20,7 @@ import kotlinx.coroutines.withContext
 import net.hogelab.android.vpndns.MainActivity
 import net.hogelab.android.vpndns.data.dns.DnsPacketParser
 import net.hogelab.android.vpndns.data.repository.RepositoryProvider
-import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
+import net.hogelab.android.vpndns.domain.repository.DnsRepository
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
@@ -34,7 +34,7 @@ class DnsVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO)
-    private val blacklistRepository: BlacklistRepository = RepositoryProvider.blacklistRepository
+    private val dnsRepository: DnsRepository = RepositoryProvider.dnsRepository
 
     companion object {
         private const val TAG = "DnsVpnService"
@@ -168,9 +168,9 @@ class DnsVpnService : VpnService() {
 
         val hostName = DnsPacketParser.parseHostName(dnsPayload)
         if (hostName != null) {
-            RepositoryProvider.dnsHistoryRepository.addHost(hostName)
+            dnsRepository.addHistory(hostName)
             
-            if (blacklistRepository.isBlocked(hostName)) {
+            if (dnsRepository.isBlocked(hostName)) {
                 Log.i(TAG_PACKET, "Blocked DNS Query (v4): $hostName")
                 serviceScope.launch {
                     val reply = buildBlockReplyV4(dnsPayload, srcIp, srcPort, dstIp, dstPort)
@@ -219,9 +219,9 @@ class DnsVpnService : VpnService() {
 
         val hostName = DnsPacketParser.parseHostName(dnsPayload)
         if (hostName != null) {
-            RepositoryProvider.dnsHistoryRepository.addHost(hostName)
-            
-            if (blacklistRepository.isBlocked(hostName)) {
+            dnsRepository.addHistory(hostName)
+
+            if (dnsRepository.isBlocked(hostName)) {
                 Log.i(TAG_PACKET, "Blocked DNS Query (v6): $hostName")
                 serviceScope.launch {
                     val reply = buildBlockReplyV6(dnsPayload, srcIp, srcPort, dstIp, dstPort)
