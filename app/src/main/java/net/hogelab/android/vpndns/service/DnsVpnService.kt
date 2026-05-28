@@ -1,0 +1,319 @@
+package net.hogelab.android.vpndns.service
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.net.VpnService
+import android.os.ParcelFileDescriptor
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import net.hogelab.android.vpndns.MainActivity
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+class DnsVpnService : VpnService() {
+
+    private var vpnInterface: ParcelFileDescriptor? = null
+    private var vpnJob: Job? = null
+    private val serviceScope = CoroutineScope(Dispatchers.IO)
+
+    companion object {
+        private const val TAG = "DnsVpnService"
+        private const val TAG_PACKET = "VpnPacketFlow"
+        private const val CHANNEL_ID = "vpn_service_channel"
+        private const val NOTIFICATION_ID = 1
+
+        private val _connectionState = MutableStateFlow(false)
+        val connectionState: StateFlow<Boolean> = _connectionState.asStateFlow()
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "STOP") {
+            stopVpn()
+            return START_NOT_STICKY
+        }
+
+        startVpn()
+        return START_STICKY
+    }
+
+    private fun startVpn() {
+        if (_connectionState.value) return
+
+        startForeground(NOTIFICATION_ID, createNotification())
+
+        try {
+            vpnInterface = Builder()
+                .setSession("VpnDns")
+                .addAddress("10.0.0.2", 32)
+                .addDnsServer("8.8.8.8")
+                .addRoute("8.8.8.8", 32)
+                // IPv6 の DNS 漏れを防ぐために Google の IPv6 DNS も追加
+                .addDnsServer("2001:4860:4860::8888")
+                .addRoute("2001:4860:4860::8888", 128)
+                .establish()
+
+            if (vpnInterface != null) {
+                _connectionState.value = true
+                Log.d(TAG, "VPN established: Hooking DNS (IPv4 & IPv6)")
+                
+                // パケット処理ループを開始
+                startPacketLoop()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to establish VPN", e)
+            stopVpn()
+        }
+    }
+
+    private fun startPacketLoop() {
+        vpnJob = serviceScope.launch {
+            val fileDescriptor = vpnInterface?.fileDescriptor ?: return@launch
+            val input = FileInputStream(fileDescriptor)
+            val output = FileOutputStream(fileDescriptor)
+            val buffer = ByteBuffer.allocate(32767)
+
+            try {
+                while (_connectionState.value) {
+                    val length = input.read(buffer.array())
+                    if (length > 0) {
+                        buffer.limit(length)
+                        buffer.rewind()
+                        
+                        // パケットをフックして処理
+                        processPacket(buffer, output)
+                        
+                        buffer.clear()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in packet loop", e)
+            }
+        }
+    }
+
+    /**
+     * DNS リクエストをフックして 8.8.8.8 へ中継する
+     */
+    private fun processPacket(packet: ByteBuffer, output: FileOutputStream) {
+        val buffer = packet.array()
+        val offset = packet.arrayOffset()
+        val limit = packet.limit()
+
+        if (limit < 20) return
+
+        val ipVersion = (buffer[offset].toInt() shr 4) and 0x0F
+        
+        // デバッグログ: 全てのパケットのバージョンを確認
+        // Log.v(TAG_PACKET, "Received IP v$ipVersion packet, size: $limit")
+
+        if (ipVersion == 4) {
+            handleIPv4(buffer, offset, limit, output)
+        } else if (ipVersion == 6) {
+            // IPv6 は現状ログのみ
+            Log.d(TAG_PACKET, "IPv6 packet detected (size: $limit), currently not supported.")
+        }
+    }
+
+    private fun handleIPv4(buffer: ByteArray, offset: Int, limit: Int, output: FileOutputStream) {
+        val protocol = buffer[offset + 9].toInt() and 0xFF
+        if (protocol != 17) return // UDP (17) のみ
+
+        val ihl = (buffer[offset].toInt() and 0x0F) * 4
+        val udpOffset = offset + ihl
+
+        val srcPort = ((buffer[udpOffset].toInt() and 0xFF) shl 8) or (buffer[udpOffset + 1].toInt() and 0xFF)
+        val dstPort = ((buffer[udpOffset + 2].toInt() and 0xFF) shl 8) or (buffer[udpOffset + 3].toInt() and 0xFF)
+
+        if (dstPort != 53) return
+
+        val udpLen = ((buffer[udpOffset + 4].toInt() and 0xFF) shl 8) or (buffer[udpOffset + 5].toInt() and 0xFF)
+        val dnsLen = udpLen - 8
+        if (dnsLen <= 0) return
+
+        val dnsPayload = ByteArray(dnsLen)
+        System.arraycopy(buffer, udpOffset + 8, dnsPayload, 0, dnsLen)
+
+        val srcIp = ByteArray(4)
+        System.arraycopy(buffer, offset + 12, srcIp, 0, 4)
+        val dstIp = ByteArray(4)
+        System.arraycopy(buffer, offset + 16, dstIp, 0, 4)
+
+        Log.d(TAG_PACKET, "DNS Query: ${formatIp(srcIp)}:$srcPort -> ${formatIp(dstIp)}:$dstPort")
+
+        serviceScope.launch {
+            relayDns(dnsPayload, srcIp, srcPort, dstIp, dstPort, output)
+        }
+    }
+
+    private suspend fun relayDns(
+        query: ByteArray,
+        srcIp: ByteArray,
+        srcPort: Int,
+        dstIp: ByteArray,
+        dstPort: Int,
+        output: FileOutputStream
+    ) = withContext(Dispatchers.IO) {
+        var socket: DatagramSocket? = null
+        try {
+            socket = DatagramSocket()
+            protect(socket) // VPN をバイパスして実ネットワークへ送る
+            socket.soTimeout = 5000
+
+            val serverAddr = InetAddress.getByName("8.8.8.8")
+            val outPacket = DatagramPacket(query, query.size, serverAddr, 53)
+            socket.send(outPacket)
+            Log.d(TAG_PACKET, "Relay -> 8.8.8.8 (${query.size} bytes)")
+
+            val responseBuffer = ByteArray(4096)
+            val inPacket = DatagramPacket(responseBuffer, responseBuffer.size)
+            socket.receive(inPacket)
+            Log.d(TAG_PACKET, "Relay <- 8.8.8.8 (${inPacket.length} bytes) for ${formatIp(srcIp)}")
+
+            // レスポンスパケットを構築して書き戻す
+            val responseData = inPacket.data.copyOfRange(0, inPacket.length)
+            val ipPacket = buildReplyPacket(dstIp, dstPort, srcIp, srcPort, responseData)
+            
+            Log.d(TAG_PACKET, "Writing reply to TUN: ${ipPacket.size} bytes")
+            synchronized(output) {
+                output.write(ipPacket)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG_PACKET, "DNS Relay error for ${formatIp(srcIp)}: ${e.message}")
+        } finally {
+            socket?.close()
+        }
+    }
+
+    private fun formatIp(ip: ByteArray): String {
+        return ip.joinToString(".") { (it.toInt() and 0xFF).toString() }
+    }
+
+    private fun buildReplyPacket(
+        srcIp: ByteArray,
+        srcPort: Int,
+        dstIp: ByteArray,
+        dstPort: Int,
+        data: ByteArray
+    ): ByteArray {
+        val totalLen = 20 + 8 + data.size
+        val packet = ByteArray(totalLen)
+        val buffer = ByteBuffer.wrap(packet)
+        buffer.order(ByteOrder.BIG_ENDIAN)
+
+        // IP Header
+        buffer.put(0x45.toByte()) // Version 4, IHL 5
+        buffer.put(0x00.toByte()) // TOS
+        buffer.putShort(totalLen.toShort())
+        buffer.putShort(0.toShort()) // ID
+        buffer.putShort(0x4000.toShort()) // Flags: Don't Fragment
+        buffer.put(64.toByte()) // TTL
+        buffer.put(17.toByte()) // Protocol: UDP
+        buffer.putShort(0.toShort()) // Checksum (Placeholder)
+        buffer.put(srcIp)
+        buffer.put(dstIp)
+
+        // Calculate IP Checksum
+        val ipChecksum = calculateChecksum(packet, 0, 20)
+        buffer.putShort(10, ipChecksum)
+
+        // UDP Header
+        buffer.putShort(srcPort.toShort())
+        buffer.putShort(dstPort.toShort())
+        buffer.putShort((8 + data.size).toShort())
+        buffer.putShort(0.toShort()) // UDP Checksum is optional in IPv4
+
+        // Payload
+        buffer.put(data)
+
+        return packet
+    }
+
+    private fun calculateChecksum(data: ByteArray, offset: Int, length: Int): Short {
+        var sum = 0
+        var i = offset
+        var len = length
+        while (len > 1) {
+            sum += ((data[i].toInt() and 0xFF) shl 8) or (data[i + 1].toInt() and 0xFF)
+            i += 2
+            len -= 2
+        }
+        if (len > 0) {
+            sum += (data[i].toInt() and 0xFF) shl 8
+        }
+        while ((sum shr 16) != 0) {
+            sum = (sum and 0xFFFF) + (sum shr 16)
+        }
+        return (sum.inv() and 0xFFFF).toShort()
+    }
+
+    private fun stopVpn() {
+        try {
+            _connectionState.value = false
+            vpnJob?.cancel()
+            vpnJob = null
+            vpnInterface?.close()
+            vpnInterface = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing VPN interface", e)
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        Log.d(TAG, "VPN stopped")
+    }
+
+    override fun onDestroy() {
+        stopVpn()
+        super.onDestroy()
+    }
+
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "VPN Service Channel",
+            NotificationManager.IMPORTANCE_LOW
+        )
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun createNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("VpnDns")
+            .setContentText("DNS protection is active")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
+    }
+}
