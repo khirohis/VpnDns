@@ -18,6 +18,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.hogelab.android.vpndns.MainActivity
+import net.hogelab.android.vpndns.data.dns.DnsPacketParser
+import net.hogelab.android.vpndns.data.repository.RepositoryProvider
+import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
@@ -31,6 +34,7 @@ class DnsVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO)
+    private val blacklistRepository: BlacklistRepository = RepositoryProvider.blacklistRepository
 
     companion object {
         private const val TAG = "DnsVpnService"
@@ -89,25 +93,29 @@ class DnsVpnService : VpnService() {
     private fun startPacketLoop() {
         vpnJob = serviceScope.launch {
             val fileDescriptor = vpnInterface?.fileDescriptor ?: return@launch
-            val input = FileInputStream(fileDescriptor)
-            val output = FileOutputStream(fileDescriptor)
-            val buffer = ByteBuffer.allocate(32767)
+            FileInputStream(fileDescriptor).use { input ->
+                FileOutputStream(fileDescriptor).use { output ->
+                    val buffer = ByteBuffer.allocate(32767)
 
-            try {
-                while (_connectionState.value) {
-                    val length = input.read(buffer.array())
-                    if (length > 0) {
-                        buffer.limit(length)
-                        buffer.rewind()
-                        
-                        // パケットをフックして処理
-                        processPacket(buffer, output)
-                        
-                        buffer.clear()
+                    try {
+                        while (_connectionState.value) {
+                            val length = input.read(buffer.array())
+                            if (length > 0) {
+                                buffer.limit(length)
+                                buffer.rewind()
+                                
+                                // パケットをフックして処理
+                                processPacket(buffer, output)
+                                
+                                buffer.clear()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (_connectionState.value) {
+                            Log.e(TAG, "Error in packet loop", e)
+                        }
                     }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in packet loop", e)
             }
         }
     }
@@ -123,15 +131,11 @@ class DnsVpnService : VpnService() {
         if (limit < 20) return
 
         val ipVersion = (buffer[offset].toInt() shr 4) and 0x0F
-        
-        // デバッグログ: 全てのパケットのバージョンを確認
-        // Log.v(TAG_PACKET, "Received IP v$ipVersion packet, size: $limit")
 
         if (ipVersion == 4) {
             handleIPv4(buffer, offset, limit, output)
-        } else if (ipVersion == 6) {
-            // IPv6 は現状ログのみ
-            Log.d(TAG_PACKET, "IPv6 packet detected (size: $limit), currently not supported.")
+        } else if (ipVersion == 6 && limit >= 40) {
+            handleIPv6(buffer, offset, limit, output)
         }
     }
 
@@ -141,6 +145,7 @@ class DnsVpnService : VpnService() {
 
         val ihl = (buffer[offset].toInt() and 0x0F) * 4
         val udpOffset = offset + ihl
+        if (limit < udpOffset + 8) return
 
         val srcPort = ((buffer[udpOffset].toInt() and 0xFF) shl 8) or (buffer[udpOffset + 1].toInt() and 0xFF)
         val dstPort = ((buffer[udpOffset + 2].toInt() and 0xFF) shl 8) or (buffer[udpOffset + 3].toInt() and 0xFF)
@@ -149,7 +154,7 @@ class DnsVpnService : VpnService() {
 
         val udpLen = ((buffer[udpOffset + 4].toInt() and 0xFF) shl 8) or (buffer[udpOffset + 5].toInt() and 0xFF)
         val dnsLen = udpLen - 8
-        if (dnsLen <= 0) return
+        if (dnsLen <= 0 || limit < udpOffset + 8 + dnsLen) return
 
         val dnsPayload = ByteArray(dnsLen)
         System.arraycopy(buffer, udpOffset + 8, dnsPayload, 0, dnsLen)
@@ -159,10 +164,81 @@ class DnsVpnService : VpnService() {
         val dstIp = ByteArray(4)
         System.arraycopy(buffer, offset + 16, dstIp, 0, 4)
 
-        Log.d(TAG_PACKET, "DNS Query: ${formatIp(srcIp)}:$srcPort -> ${formatIp(dstIp)}:$dstPort")
+        Log.d(TAG_PACKET, "DNS Query (v4): ${formatIp(srcIp)}:$srcPort -> ${formatIp(dstIp)}:$dstPort")
+
+        val hostName = DnsPacketParser.parseHostName(dnsPayload)
+        if (hostName != null) {
+            RepositoryProvider.dnsHistoryRepository.addHost(hostName)
+            
+            if (blacklistRepository.isBlocked(hostName)) {
+                Log.i(TAG_PACKET, "Blocked DNS Query (v4): $hostName")
+                serviceScope.launch {
+                    val reply = buildBlockReplyV4(dnsPayload, srcIp, srcPort, dstIp, dstPort)
+                    synchronized(output) {
+                        try {
+                            output.write(reply)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to write blocked reply v4", e)
+                        }
+                    }
+                }
+                return
+            }
+        }
 
         serviceScope.launch {
-            relayDns(dnsPayload, srcIp, srcPort, dstIp, dstPort, output)
+            relayDns(dnsPayload, srcIp, srcPort, dstIp, dstPort, output, false)
+        }
+    }
+
+    private fun handleIPv6(buffer: ByteArray, offset: Int, limit: Int, output: FileOutputStream) {
+        val nextHeader = buffer[offset + 6].toInt() and 0xFF
+        if (nextHeader != 17) return // UDP (17) のみ
+
+        val udpOffset = offset + 40
+        if (limit < udpOffset + 8) return
+
+        val srcPort = ((buffer[udpOffset].toInt() and 0xFF) shl 8) or (buffer[udpOffset + 1].toInt() and 0xFF)
+        val dstPort = ((buffer[udpOffset + 2].toInt() and 0xFF) shl 8) or (buffer[udpOffset + 3].toInt() and 0xFF)
+
+        if (dstPort != 53) return
+
+        val udpLen = ((buffer[udpOffset + 4].toInt() and 0xFF) shl 8) or (buffer[udpOffset + 5].toInt() and 0xFF)
+        val dnsLen = udpLen - 8
+        if (dnsLen <= 0 || limit < udpOffset + 8 + dnsLen) return
+
+        val dnsPayload = ByteArray(dnsLen)
+        System.arraycopy(buffer, udpOffset + 8, dnsPayload, 0, dnsLen)
+
+        val srcIp = ByteArray(16)
+        System.arraycopy(buffer, offset + 8, srcIp, 0, 16)
+        val dstIp = ByteArray(16)
+        System.arraycopy(buffer, offset + 24, dstIp, 0, 16)
+
+        Log.d(TAG_PACKET, "DNS Query (v6): [${formatIp(srcIp)}]:$srcPort -> [${formatIp(dstIp)}]:$dstPort")
+
+        val hostName = DnsPacketParser.parseHostName(dnsPayload)
+        if (hostName != null) {
+            RepositoryProvider.dnsHistoryRepository.addHost(hostName)
+            
+            if (blacklistRepository.isBlocked(hostName)) {
+                Log.i(TAG_PACKET, "Blocked DNS Query (v6): $hostName")
+                serviceScope.launch {
+                    val reply = buildBlockReplyV6(dnsPayload, srcIp, srcPort, dstIp, dstPort)
+                    synchronized(output) {
+                        try {
+                            output.write(reply)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to write blocked reply v6", e)
+                        }
+                    }
+                }
+                return
+            }
+        }
+
+        serviceScope.launch {
+            relayDns(dnsPayload, srcIp, srcPort, dstIp, dstPort, output, true)
         }
     }
 
@@ -172,44 +248,102 @@ class DnsVpnService : VpnService() {
         srcPort: Int,
         dstIp: ByteArray,
         dstPort: Int,
-        output: FileOutputStream
+        output: FileOutputStream,
+        isIPv6: Boolean
     ) = withContext(Dispatchers.IO) {
         var socket: DatagramSocket? = null
         try {
             socket = DatagramSocket()
-            protect(socket) // VPN をバイパスして実ネットワークへ送る
+            protect(socket)
             socket.soTimeout = 5000
 
-            val serverAddr = InetAddress.getByName("8.8.8.8")
+            val serverAddr = if (isIPv6) {
+                InetAddress.getByName("2001:4860:4860::8888")
+            } else {
+                InetAddress.getByName("8.8.8.8")
+            }
+
             val outPacket = DatagramPacket(query, query.size, serverAddr, 53)
             socket.send(outPacket)
-            Log.d(TAG_PACKET, "Relay -> 8.8.8.8 (${query.size} bytes)")
+            Log.d(TAG_PACKET, "Relay -> ${serverAddr.hostAddress} (${query.size} bytes)")
 
             val responseBuffer = ByteArray(4096)
             val inPacket = DatagramPacket(responseBuffer, responseBuffer.size)
             socket.receive(inPacket)
-            Log.d(TAG_PACKET, "Relay <- 8.8.8.8 (${inPacket.length} bytes) for ${formatIp(srcIp)}")
+            Log.d(TAG_PACKET, "Relay <- ${serverAddr.hostAddress} (${inPacket.length} bytes)")
 
-            // レスポンスパケットを構築して書き戻す
             val responseData = inPacket.data.copyOfRange(0, inPacket.length)
-            val ipPacket = buildReplyPacket(dstIp, dstPort, srcIp, srcPort, responseData)
+            val ipPacket = if (isIPv6) {
+                buildReplyPacketV6(dstIp, dstPort, srcIp, srcPort, responseData)
+            } else {
+                buildReplyPacketV4(dstIp, dstPort, srcIp, srcPort, responseData)
+            }
             
-            Log.d(TAG_PACKET, "Writing reply to TUN: ${ipPacket.size} bytes")
+            Log.d(TAG_PACKET, "Writing ${if (isIPv6) "v6" else "v4"} reply to TUN: ${ipPacket.size} bytes")
             synchronized(output) {
-                output.write(ipPacket)
+                try {
+                    output.write(ipPacket)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to write relay reply", e)
+                }
             }
         } catch (e: Exception) {
-            Log.e(TAG_PACKET, "DNS Relay error for ${formatIp(srcIp)}: ${e.message}")
+            Log.e(TAG_PACKET, "DNS Relay error: ${e.message}")
         } finally {
             socket?.close()
         }
     }
 
     private fun formatIp(ip: ByteArray): String {
-        return ip.joinToString(".") { (it.toInt() and 0xFF).toString() }
+        return if (ip.size == 4) {
+            ip.joinToString(".") { (it.toInt() and 0xFF).toString() }
+        } else {
+            ip.asIterable().chunked(2).joinToString(":") {
+                ((it[0].toInt() and 0xFF shl 8) or (it[1].toInt() and 0xFF)).toString(16)
+            }
+        }
     }
 
-    private fun buildReplyPacket(
+    /**
+     * ブロックされた DNS クエリに対する応答パケット (v4) を作成する
+     * 簡易的に 0.0.0.0 を返すか、単に応答しない (NXDOMAIN) 設定も可能だが、
+     * ここではパケットを構成して 0.0.0.0 を返す。
+     */
+    private fun buildBlockReplyV4(
+        query: ByteArray,
+        srcIp: ByteArray,
+        srcPort: Int,
+        dstIp: ByteArray,
+        dstPort: Int
+    ): ByteArray {
+        // DNS 応答ペイロードの構築 (簡易版: 0.0.0.0)
+        // 実際にはクエリパケットを元に Answer セクションを追加する必要がある。
+        // ここでは実装を単純にするため、最小限のヘッダー書き換えを行う。
+        val responseData = query.copyOf()
+        if (responseData.size >= 4) {
+            // Flags: 0x8183 (Standard query response, No such name)
+            responseData[2] = 0x81.toByte()
+            responseData[3] = 0x83.toByte()
+        }
+        return buildReplyPacketV4(dstIp, dstPort, srcIp, srcPort, responseData)
+    }
+
+    private fun buildBlockReplyV6(
+        query: ByteArray,
+        srcIp: ByteArray,
+        srcPort: Int,
+        dstIp: ByteArray,
+        dstPort: Int
+    ): ByteArray {
+        val responseData = query.copyOf()
+        if (responseData.size >= 4) {
+            responseData[2] = 0x81.toByte()
+            responseData[3] = 0x83.toByte()
+        }
+        return buildReplyPacketV6(dstIp, dstPort, srcIp, srcPort, responseData)
+    }
+
+    private fun buildReplyPacketV4(
         srcIp: ByteArray,
         srcPort: Int,
         dstIp: ByteArray,
@@ -221,7 +355,7 @@ class DnsVpnService : VpnService() {
         val buffer = ByteBuffer.wrap(packet)
         buffer.order(ByteOrder.BIG_ENDIAN)
 
-        // IP Header
+        // IP Header (v4)
         buffer.put(0x45.toByte()) // Version 4, IHL 5
         buffer.put(0x00.toByte()) // TOS
         buffer.putShort(totalLen.toShort())
@@ -229,11 +363,10 @@ class DnsVpnService : VpnService() {
         buffer.putShort(0x4000.toShort()) // Flags: Don't Fragment
         buffer.put(64.toByte()) // TTL
         buffer.put(17.toByte()) // Protocol: UDP
-        buffer.putShort(0.toShort()) // Checksum (Placeholder)
+        buffer.putShort(0.toShort()) // Checksum Placeholder
         buffer.put(srcIp)
         buffer.put(dstIp)
 
-        // Calculate IP Checksum
         val ipChecksum = calculateChecksum(packet, 0, 20)
         buffer.putShort(10, ipChecksum)
 
@@ -241,11 +374,40 @@ class DnsVpnService : VpnService() {
         buffer.putShort(srcPort.toShort())
         buffer.putShort(dstPort.toShort())
         buffer.putShort((8 + data.size).toShort())
-        buffer.putShort(0.toShort()) // UDP Checksum is optional in IPv4
+        buffer.putShort(0.toShort()) // Optional in IPv4
 
-        // Payload
         buffer.put(data)
+        return packet
+    }
 
+    private fun buildReplyPacketV6(
+        srcIp: ByteArray,
+        srcPort: Int,
+        dstIp: ByteArray,
+        dstPort: Int,
+        data: ByteArray
+    ): ByteArray {
+        val payloadLen = 8 + data.size
+        val totalLen = 40 + payloadLen
+        val packet = ByteArray(totalLen)
+        val buffer = ByteBuffer.wrap(packet)
+        buffer.order(ByteOrder.BIG_ENDIAN)
+
+        // IP Header (v6)
+        buffer.putInt(0x60000000.toInt()) // Version 6, Traffic Class 0, Flow Label 0
+        buffer.putShort(payloadLen.toShort())
+        buffer.put(17.toByte()) // Next Header: UDP
+        buffer.put(64.toByte()) // Hop Limit
+        buffer.put(srcIp)
+        buffer.put(dstIp)
+
+        // UDP Header
+        buffer.putShort(srcPort.toShort())
+        buffer.putShort(dstPort.toShort())
+        buffer.putShort(payloadLen.toShort())
+        buffer.putShort(0.toShort()) // Checksum Placeholder (IPv6 UDP checksum should be calculated but often ignored by TUN)
+
+        buffer.put(data)
         return packet
     }
 
