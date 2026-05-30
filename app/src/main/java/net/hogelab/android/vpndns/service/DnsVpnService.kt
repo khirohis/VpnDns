@@ -89,11 +89,16 @@ class DnsVpnService : VpnService() {
             vpnInterface = Builder()
                 .setSession("VpnDns")
                 .addAddress("10.0.0.2", 32)
+                // IPv4 DNS Servers (Google DNS pairs)
                 .addDnsServer("8.8.8.8")
+                .addDnsServer("8.8.4.4")
                 .addRoute("8.8.8.8", 32)
-                // IPv6 の DNS 漏れを防ぐために Google の IPv6 DNS も追加
+                .addRoute("8.8.4.4", 32)
+                // IPv6 DNS Servers (Google DNS pairs)
                 .addDnsServer("2001:4860:4860::8888")
+                .addDnsServer("2001:4860:4860::8844")
                 .addRoute("2001:4860:4860::8888", 128)
+                .addRoute("2001:4860:4860::8844", 128)
                 .establish()
 
             if (vpnInterface != null) {
@@ -276,11 +281,8 @@ class DnsVpnService : VpnService() {
             protect(socket)
             socket.soTimeout = 5000
 
-            val serverAddr = if (isIPv6) {
-                InetAddress.getByName("2001:4860:4860::8888")
-            } else {
-                InetAddress.getByName("8.8.8.8")
-            }
+            // クライアントがリクエストした宛先 IP をそのまま上流サーバーとして使用する
+            val serverAddr = InetAddress.getByAddress(dstIp)
 
             val outPacket = DatagramPacket(query, query.size, serverAddr, 53)
             socket.send(outPacket)
