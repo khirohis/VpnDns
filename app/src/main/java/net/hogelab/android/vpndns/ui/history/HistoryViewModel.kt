@@ -3,6 +3,7 @@ package net.hogelab.android.vpndns.ui.history
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.StateFlow
 import net.hogelab.android.vpndns.data.repository.RepositoryProvider
+import net.hogelab.android.vpndns.domain.model.BlockType
 import net.hogelab.android.vpndns.domain.model.DnsEntry
 import net.hogelab.android.vpndns.domain.model.HistorySortConfig
 import net.hogelab.android.vpndns.domain.model.SortField
@@ -31,10 +32,13 @@ class HistoryViewModel(
     }
 
     fun toggleBlock(entry: DnsEntry) {
-        if (entry.isBlocked) {
-            repository.removeFromBlacklist(entry.hostName)
-        } else {
-            repository.addToBlacklist(entry.hostName)
+        when (entry.blockType) {
+            BlockType.EXACT -> repository.removeFromBlacklist(entry.hostName)
+            BlockType.NONE -> repository.addToBlacklist(entry.hostName)
+            BlockType.PATTERN_MATCHED -> {
+                // パターン一致の場合は個別に解除できないため、何もしないか
+                // あるいは将来的にブラックリスト画面へ遷移させる等の処理
+            }
         }
     }
 

@@ -11,11 +11,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import net.hogelab.android.vpndns.domain.model.BlacklistEntry
+import net.hogelab.android.vpndns.domain.model.BlockType
 import net.hogelab.android.vpndns.domain.model.DnsEntry
 import net.hogelab.android.vpndns.domain.model.HistorySortConfig
 import net.hogelab.android.vpndns.domain.model.SortField
 import net.hogelab.android.vpndns.domain.model.SortOrder
 import net.hogelab.android.vpndns.domain.repository.DnsRepository
+import net.hogelab.android.vpndns.data.repository.util.DomainTrie
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -32,6 +34,7 @@ class InMemoryDnsRepository : DnsRepository {
 
     // ブラックリストのデータ
     private val blockedMap = ConcurrentHashMap<String, BlacklistEntry>()
+    private val wildcardTrie = DomainTrie()
     private val _rawBlacklist = MutableStateFlow<List<BlacklistEntry>>(emptyList())
 
     private val _sortConfig = MutableStateFlow(HistorySortConfig())
@@ -48,9 +51,18 @@ class InMemoryDnsRepository : DnsRepository {
     ) { rawMap, blockedList, sort ->
         val blockedHosts = blockedList.map { it.hostName }.toSet()
         rawMap.values.asSequence().map { entry ->
-            entry.copy(isBlocked = blockedHosts.contains(entry.hostName))
+            val isExact = blockedHosts.contains(entry.hostName)
+            val isPattern = if (!isExact) wildcardTrie.matches(entry.hostName) else false
+            
+            entry.copy(
+                blockType = when {
+                    isExact -> BlockType.EXACT
+                    isPattern -> BlockType.PATTERN_MATCHED
+                    else -> BlockType.NONE
+                }
+            )
         }.filter { entry ->
-            sort.showBlocked || !entry.isBlocked
+            sort.showBlocked || entry.blockType == BlockType.NONE
         }.sortedWith { a, b ->
             val result = when (sort.field) {
                 SortField.FIRST_SEEN -> a.firstSeen.compareTo(b.firstSeen)
@@ -94,21 +106,34 @@ class InMemoryDnsRepository : DnsRepository {
             hostName = hostName,
             addedAt = System.currentTimeMillis()
         )
+        
+        if (hostName.contains("*")) {
+            wildcardTrie.insert(hostName)
+        }
+        
         updateBlacklist()
     }
 
     override fun removeFromBlacklist(hostName: String) {
         if (blockedMap.remove(hostName) != null) {
+            if (hostName.contains("*")) {
+                wildcardTrie.remove(hostName)
+            }
             updateBlacklist()
         }
     }
 
     override fun isBlocked(hostName: String): Boolean {
-        return blockedMap.containsKey(hostName)
+        // Stage 1: Exact Match
+        if (blockedMap.containsKey(hostName)) return true
+        
+        // Stage 2: Suffix/Pattern Match via Trie
+        return wildcardTrie.matches(hostName)
     }
 
     override fun clearBlacklist() {
         blockedMap.clear()
+        wildcardTrie.clear()
         updateBlacklist()
     }
 
@@ -134,12 +159,17 @@ class InMemoryDnsRepository : DnsRepository {
             if (file.exists()) {
                 val lines = file.readLines()
                 blockedMap.clear()
+                wildcardTrie.clear()
                 lines.forEach { line ->
                     val parts = line.split(",")
                     if (parts.size == 2) {
                         val hostName = parts[0]
                         val addedAt = parts[1].toLongOrNull() ?: System.currentTimeMillis()
                         blockedMap[hostName] = BlacklistEntry(hostName, addedAt)
+                        
+                        if (hostName.contains("*")) {
+                            wildcardTrie.insert(hostName)
+                        }
                     }
                 }
                 updateBlacklist()

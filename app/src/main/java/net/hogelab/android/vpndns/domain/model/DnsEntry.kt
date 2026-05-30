@@ -14,10 +14,16 @@ data class HistorySortConfig(
     val showBlocked: Boolean = true
 )
 
+enum class BlockType {
+    NONE,           // 未ブロック
+    EXACT,          // 完全一致ブロック
+    PATTERN_MATCHED // パターン一致ブロック
+}
+
 data class DnsEntry(
     val hostName: String,
     val firstSeen: Long,
     val lastSeen: Long,
     val requestCount: Int,
-    val isBlocked: Boolean = false
+    val blockType: BlockType = BlockType.NONE
 )

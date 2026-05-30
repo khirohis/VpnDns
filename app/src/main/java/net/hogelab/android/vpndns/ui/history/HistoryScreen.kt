@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -34,6 +35,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import net.hogelab.android.vpndns.domain.model.BlockType
 import net.hogelab.android.vpndns.domain.model.HistorySortConfig
 import net.hogelab.android.vpndns.domain.model.SortField
 import net.hogelab.android.vpndns.domain.model.SortOrder
@@ -90,19 +92,34 @@ fun HistoryScreen(
             val dateFormat = SimpleDateFormat("MM/dd HH:mm:ss", Locale.getDefault())
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(history) { entry ->
+                    val color = when (entry.blockType) {
+                        BlockType.EXACT -> MaterialTheme.colorScheme.error
+                        BlockType.PATTERN_MATCHED -> MaterialTheme.colorScheme.tertiary // オレンジ/茶色系
+                        BlockType.NONE -> MaterialTheme.colorScheme.onSurface
+                    }
+
                     ListItem(
                         headlineContent = { 
                             Text(
                                 text = entry.hostName,
-                                color = if (entry.isBlocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                                fontWeight = if (entry.isBlocked) FontWeight.Bold else FontWeight.Normal
+                                color = color,
+                                fontWeight = if (entry.blockType != BlockType.NONE) FontWeight.Bold else FontWeight.Normal
                             )
                         },
                         supportingContent = {
-                            Text(
-                                "First: ${dateFormat.format(Date(entry.firstSeen))}\n" +
-                                "Last: ${dateFormat.format(Date(entry.lastSeen))}"
-                            )
+                            Column {
+                                Text(
+                                    "First: ${dateFormat.format(Date(entry.firstSeen))}\n" +
+                                    "Last: ${dateFormat.format(Date(entry.lastSeen))}"
+                                )
+                                if (entry.blockType == BlockType.PATTERN_MATCHED) {
+                                    Text(
+                                        text = "Blocked by pattern",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = color
+                                    )
+                                }
+                            }
                         },
                         trailingContent = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -117,11 +134,18 @@ fun HistoryScreen(
                                         style = MaterialTheme.typography.labelSmall
                                     )
                                 }
-                                IconButton(onClick = { viewModel.toggleBlock(entry) }) {
+                                IconButton(
+                                    onClick = { viewModel.toggleBlock(entry) },
+                                    enabled = entry.blockType != BlockType.PATTERN_MATCHED
+                                ) {
                                     Icon(
-                                        imageVector = Icons.Default.Block,
-                                        contentDescription = if (entry.isBlocked) "Unblock" else "Block",
-                                        tint = if (entry.isBlocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline
+                                        imageVector = if (entry.blockType == BlockType.PATTERN_MATCHED) Icons.Default.FilterAlt else Icons.Default.Block,
+                                        contentDescription = when (entry.blockType) {
+                                            BlockType.EXACT -> "Unblock"
+                                            BlockType.PATTERN_MATCHED -> "Pattern Blocked"
+                                            else -> "Block"
+                                        },
+                                        tint = if (entry.blockType != BlockType.NONE) color else MaterialTheme.colorScheme.outline
                                     )
                                 }
                             }
