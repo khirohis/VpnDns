@@ -66,6 +66,9 @@ class DnsVpnService : VpnService() {
     private fun startVpn() {
         if (_connectionState.value) return
 
+        // 前処理としてブラックリストをロード
+        dnsRepository.loadBlacklist(this)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
@@ -448,6 +451,11 @@ class DnsVpnService : VpnService() {
     private fun stopVpn() {
         try {
             _connectionState.value = false
+            
+            // VPN 停止時にブラックリストを保存し、履歴をクリア
+            dnsRepository.saveBlacklist(this)
+            dnsRepository.clearHistory()
+
             vpnJob?.cancel()
             vpnJob = null
             vpnInterface?.close()

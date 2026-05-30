@@ -1,5 +1,6 @@
 package net.hogelab.android.vpndns.data.repository
 
+import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -15,6 +16,7 @@ import net.hogelab.android.vpndns.domain.model.HistorySortConfig
 import net.hogelab.android.vpndns.domain.model.SortField
 import net.hogelab.android.vpndns.domain.model.SortOrder
 import net.hogelab.android.vpndns.domain.repository.DnsRepository
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -110,6 +112,39 @@ class InMemoryDnsRepository : DnsRepository {
 
     override fun setSortConfig(config: HistorySortConfig) {
         _sortConfig.value = config
+    }
+
+    override fun saveBlacklist(context: Context) {
+        try {
+            val file = File(context.filesDir, "blacklist.txt")
+            val content = _rawBlacklist.value.joinToString("\n") { 
+                "${it.hostName},${it.addedAt}" 
+            }
+            file.writeText(content)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    override fun loadBlacklist(context: Context) {
+        try {
+            val file = File(context.filesDir, "blacklist.txt")
+            if (file.exists()) {
+                val lines = file.readLines()
+                blockedMap.clear()
+                lines.forEach { line ->
+                    val parts = line.split(",")
+                    if (parts.size == 2) {
+                        val hostName = parts[0]
+                        val addedAt = parts[1].toLongOrNull() ?: System.currentTimeMillis()
+                        blockedMap[hostName] = BlacklistEntry(hostName, addedAt)
+                    }
+                }
+                updateBlacklist()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun updateBlacklist() {
