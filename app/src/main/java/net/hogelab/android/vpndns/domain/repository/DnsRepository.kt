@@ -1,5 +1,6 @@
 package net.hogelab.android.vpndns.domain.repository
 
+import android.content.Context
 import kotlinx.coroutines.flow.StateFlow
 import net.hogelab.android.vpndns.domain.model.BlacklistEntry
 import net.hogelab.android.vpndns.domain.model.DnsEntry
@@ -58,4 +59,14 @@ interface DnsRepository {
      * ソート設定を変更する
      */
     fun setSortConfig(config: HistorySortConfig)
+
+    /**
+     * ブラックリストをファイルに保存する
+     */
+    fun saveBlacklist(context: Context)
+
+    /**
+     * ブラックリストをファイルから読み込む
+     */
+    fun loadBlacklist(context: Context)
 }
