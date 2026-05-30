@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,6 +17,8 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -65,7 +69,8 @@ fun HistoryScreen(
 
         SortHeader(
             config = sortConfig,
-            onFieldClick = { viewModel.onSortFieldSelected(it) }
+            onFieldClick = { viewModel.onSortFieldSelected(it) },
+            onToggleFilter = { viewModel.toggleShowBlocked() }
         )
 
         HorizontalDivider()
@@ -132,22 +137,50 @@ fun HistoryScreen(
 @Composable
 fun SortHeader(
     config: HistorySortConfig,
-    onFieldClick: (SortField) -> Unit
+    onFieldClick: (SortField) -> Unit,
+    onToggleFilter: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
-        Text(text = "Sort by:", style = MaterialTheme.typography.labelMedium)
-        
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            SortChip(field = SortField.HOST_NAME, label = "Name", config = config, onClick = onFieldClick)
-            SortChip(field = SortField.FIRST_SEEN, label = "First", config = config, onClick = onFieldClick)
-            SortChip(field = SortField.LAST_SEEN, label = "Last", config = config, onClick = onFieldClick)
-            SortChip(field = SortField.REQUEST_COUNT, label = "Count", config = config, onClick = onFieldClick)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (config.showBlocked) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                contentDescription = null,
+                modifier = Modifier.padding(end = 8.dp),
+                tint = if (config.showBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+            )
+            Text(
+                text = if (config.showBlocked) "Showing Blocked" else "Hidden Blocked",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (config.showBlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(
+                checked = config.showBlocked,
+                onCheckedChange = { onToggleFilter() },
+                modifier = Modifier.scale(0.7f)
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+            Text(text = "Sort:", style = MaterialTheme.typography.labelMedium)
+            
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                SortChip(field = SortField.HOST_NAME, label = "Name", config = config, onClick = onFieldClick)
+                SortChip(field = SortField.FIRST_SEEN, label = "First", config = config, onClick = onFieldClick)
+                SortChip(field = SortField.LAST_SEEN, label = "Last", config = config, onClick = onFieldClick)
+                SortChip(field = SortField.REQUEST_COUNT, label = "Count", config = config, onClick = onFieldClick)
+            }
         }
     }
 }
