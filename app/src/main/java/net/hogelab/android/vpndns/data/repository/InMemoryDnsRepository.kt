@@ -47,8 +47,10 @@ class InMemoryDnsRepository : DnsRepository {
         sortConfig
     ) { rawMap, blockedList, sort ->
         val blockedHosts = blockedList.map { it.hostName }.toSet()
-        rawMap.values.map { entry ->
+        rawMap.values.asSequence().map { entry ->
             entry.copy(isBlocked = blockedHosts.contains(entry.hostName))
+        }.filter { entry ->
+            sort.showBlocked || !entry.isBlocked
         }.sortedWith { a, b ->
             val result = when (sort.field) {
                 SortField.FIRST_SEEN -> a.firstSeen.compareTo(b.firstSeen)
@@ -57,7 +59,7 @@ class InMemoryDnsRepository : DnsRepository {
                 SortField.HOST_NAME -> a.hostName.compareTo(b.hostName, ignoreCase = true)
             }
             if (sort.order == SortOrder.ASCENDING) result else -result
-        }
+        }.toList()
     }.stateIn(repositoryScope, SharingStarted.Eagerly, emptyList())
 
     override fun addHistory(host: String) {

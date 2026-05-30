@@ -22,7 +22,12 @@ class HistoryViewModel(
         } else {
             SortOrder.DESCENDING
         }
-        repository.setSortConfig(HistorySortConfig(field, nextOrder))
+        repository.setSortConfig(current.copy(field = field, order = nextOrder))
+    }
+
+    fun toggleShowBlocked() {
+        val current = sortConfig.value
+        repository.setSortConfig(current.copy(showBlocked = !current.showBlocked))
     }
 
     fun toggleBlock(entry: DnsEntry) {
