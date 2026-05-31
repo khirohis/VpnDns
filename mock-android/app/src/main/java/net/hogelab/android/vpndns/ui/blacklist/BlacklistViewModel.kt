@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.domain.model.BlacklistEntity
 import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
@@ -39,6 +40,10 @@ class BlacklistViewModel @JvmOverloads constructor(
         inputHostName = value
     }
 
+    fun onWildcardShortcutClick(baseDomain: String) {
+        inputHostName = "*.$baseDomain"
+    }
+
     fun onAddClick() {
         val host = inputHostName.trim()
         if (host.isEmpty()) return
@@ -52,17 +57,21 @@ class BlacklistViewModel @JvmOverloads constructor(
         }
         
         repository.addToBlacklist(host)
-        repository.saveBlacklist(getApplication()) // 永続化
+        viewModelScope.launch {
+            repository.saveBlacklist(getApplication()) // 永続化
+        }
         inputHostName = ""
     }
 
     fun confirmAddWithCleanup() {
         val host = inputHostName.trim()
-        redundantEntries?.forEach { 
-            repository.removeFromBlacklist(it)
+        viewModelScope.launch {
+            redundantEntries?.forEach { 
+                repository.removeFromBlacklist(it)
+            }
+            repository.addToBlacklist(host)
+            repository.saveBlacklist(getApplication()) // 永続化
         }
-        repository.addToBlacklist(host)
-        repository.saveBlacklist(getApplication()) // 永続化
         inputHostName = ""
         redundantEntries = null
     }
@@ -81,11 +90,22 @@ class BlacklistViewModel @JvmOverloads constructor(
 
     fun removeEntry(hostName: String) {
         repository.removeFromBlacklist(hostName)
-        repository.saveBlacklist(getApplication()) // 永続化
+        viewModelScope.launch {
+            repository.saveBlacklist(getApplication()) // 永続化
+        }
+    }
+
+    fun togglePending(hostName: String) {
+        repository.togglePending(hostName)
+        viewModelScope.launch {
+            repository.saveBlacklist(getApplication()) // 永続化
+        }
     }
 
     fun clearAll() {
         repository.clearBlacklist()
-        repository.saveBlacklist(getApplication()) // 永続化
+        viewModelScope.launch {
+            repository.saveBlacklist(getApplication()) // 永続化
+        }
     }
 }

@@ -75,73 +75,78 @@ class VpnDnsService : VpnService() {
     private fun startVpn() {
         if (_connectionState.value) return
 
-        // DNS サービス層の責務: 起動時に最新のルールをリロード（ファイル -> メモリ）し、履歴をリセット
-        blacklistRepository.loadBlacklist(this)
-        dnsRepository.clearHistory()
+        serviceScope.launch {
+            // DNS サービス層の責務: 起動時に最新のルールをリロード（ファイル -> メモリ）し、履歴をリセット
+            // loadBlacklist は内部で二重読み込み防止と同期制御を行っている
+            blacklistRepository.loadBlacklist(this@VpnDnsService)
+            dnsRepository.clearHistory()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                createNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                createNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, createNotification())
-        }
-
-        try {
-            vpnInterface = Builder()
-                .setSession("VpnDns")
-                .addAddress("10.0.0.2", 32)
-                // IPv4 DNS Servers (Google DNS pairs)
-                .addDnsServer("8.8.8.8")
-                .addDnsServer("8.8.4.4")
-                .addRoute("8.8.8.8", 32)
-                .addRoute("8.8.4.4", 32)
-                // IPv6 DNS Servers (Google DNS pairs)
-                .addDnsServer("2001:4860:4860::8888")
-                .addDnsServer("2001:4860:4860::8844")
-                .addRoute("2001:4860:4860::8888", 128)
-                .addRoute("2001:4860:4860::8844", 128)
-                .establish()
-
-            if (vpnInterface != null) {
-                _connectionState.value = true
-                Log.d(TAG, "VPN established: Delegating packet processing to Interceptor")
-                
-                // パケットインターセプト処理を開始
-                dnsInterceptor.start(vpnInterface!!)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    createNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to establish VPN", e)
-            stopVpn()
+
+            try {
+                vpnInterface = Builder()
+                    .setSession("VpnDns")
+                    .addAddress("10.0.0.2", 32)
+                    // IPv4 DNS Servers (Google DNS pairs)
+                    .addDnsServer("8.8.8.8")
+                    .addDnsServer("8.8.4.4")
+                    .addRoute("8.8.8.8", 32)
+                    .addRoute("8.8.4.4", 32)
+                    // IPv6 DNS Servers (Google DNS pairs)
+                    .addDnsServer("2001:4860:4860::8888")
+                    .addDnsServer("2001:4860:4860::8844")
+                    .addRoute("2001:4860:4860::8888", 128)
+                    .addRoute("2001:4860:4860::8844", 128)
+                    .establish()
+
+                if (vpnInterface != null) {
+                    _connectionState.value = true
+                    Log.d(TAG, "VPN established: Delegating packet processing to Interceptor")
+                    
+                    // パケットインターセプト処理を開始
+                    dnsInterceptor.start(vpnInterface!!)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to establish VPN", e)
+                stopVpn()
+            }
         }
     }
 
     private fun stopVpn() {
-        try {
-            _connectionState.value = false
-            
-            // 処理を停止
-            dnsInterceptor.stop()
+        serviceScope.launch {
+            try {
+                _connectionState.value = false
+                
+                // 処理を停止
+                dnsInterceptor.stop()
 
-            // DNS サービス層の責務: 停止時に現在のメモリ状態を念のため永続化
-            blacklistRepository.saveBlacklist(this)
+                // DNS サービス層の責務: 停止時に現在のメモリ状態を念のため永続化
+                blacklistRepository.saveBlacklist(this@VpnDnsService)
 
-            vpnInterface?.close()
-            vpnInterface = null
-        } catch (e: Exception) {
-            Log.e(TAG, "Error closing VPN interface", e)
+                vpnInterface?.close()
+                vpnInterface = null
+            } catch (e: Exception) {
+                Log.e(TAG, "Error closing VPN interface", e)
+            }
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            Log.d(TAG, "VPN stopped")
         }
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-        Log.d(TAG, "VPN stopped")
     }
 
     override fun onDestroy() {

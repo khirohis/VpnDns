@@ -94,7 +94,8 @@ fun HistoryScreen(
                 items(history) { entry ->
                     val color = when (entry.blockType) {
                         BlockType.EXACT -> MaterialTheme.colorScheme.error
-                        BlockType.PATTERN_MATCHED -> MaterialTheme.colorScheme.tertiary // オレンジ/茶色系
+                        BlockType.PATTERN_MATCHED -> MaterialTheme.colorScheme.tertiary
+                        BlockType.PENDING -> MaterialTheme.colorScheme.outline
                         BlockType.NONE -> MaterialTheme.colorScheme.onSurface
                     }
 
@@ -115,6 +116,12 @@ fun HistoryScreen(
                                 if (entry.blockType == BlockType.PATTERN_MATCHED) {
                                     Text(
                                         text = "Blocked by pattern",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = color
+                                    )
+                                } else if (entry.blockType == BlockType.PENDING) {
+                                    Text(
+                                        text = "Blocking paused",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = color
                                     )

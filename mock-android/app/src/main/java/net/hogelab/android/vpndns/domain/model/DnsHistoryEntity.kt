@@ -17,7 +17,8 @@ data class HistorySortConfig(
 enum class BlockType {
     NONE,           // 未ブロック
     EXACT,          // 完全一致ブロック
-    PATTERN_MATCHED // パターン一致ブロック
+    PATTERN_MATCHED, // パターン一致ブロック
+    PENDING         // リストにあるが保留中
 }
 
 data class DnsHistoryEntity(
