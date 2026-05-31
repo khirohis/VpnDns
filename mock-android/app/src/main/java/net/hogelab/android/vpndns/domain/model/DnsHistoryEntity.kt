@@ -20,10 +20,9 @@ enum class BlockType {
     PATTERN_MATCHED // パターン一致ブロック
 }
 
-data class DnsEntry(
+data class DnsHistoryEntity(
     val hostName: String,
-    val firstSeen: Long,
-    val lastSeen: Long,
-    val requestCount: Int,
-    val blockType: BlockType = BlockType.NONE
+    val firstTime: Long,
+    val accessTime: Long,
+    val requestCount: Int
 )

@@ -101,7 +101,7 @@ fun HistoryScreen(
                     ListItem(
                         headlineContent = { 
                             Text(
-                                text = entry.hostName,
+                                text = entry.entity.hostName,
                                 color = color,
                                 fontWeight = if (entry.blockType != BlockType.NONE) FontWeight.Bold else FontWeight.Normal
                             )
@@ -109,8 +109,8 @@ fun HistoryScreen(
                         supportingContent = {
                             Column {
                                 Text(
-                                    "First: ${dateFormat.format(Date(entry.firstSeen))}\n" +
-                                    "Last: ${dateFormat.format(Date(entry.lastSeen))}"
+                                    "First: ${dateFormat.format(Date(entry.entity.firstTime))}\n" +
+                                    "Last: ${dateFormat.format(Date(entry.entity.accessTime))}"
                                 )
                                 if (entry.blockType == BlockType.PATTERN_MATCHED) {
                                     Text(
@@ -125,7 +125,7 @@ fun HistoryScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(end = 8.dp)) {
                                     Text(
-                                        text = entry.requestCount.toString(),
+                                        text = entry.entity.requestCount.toString(),
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold
                                     )
