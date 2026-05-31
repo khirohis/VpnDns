@@ -7,7 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.hogelab.android.vpndns.domain.interceptor.DnsInterceptor
-import net.hogelab.android.vpndns.domain.repository.DnsRepository
+import net.hogelab.android.vpndns.domain.repository.DnsHistoryRepository
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
@@ -21,7 +21,7 @@ import java.nio.ByteOrder
  * パケットの解析から DNS リレー、応答パケットの構築までを担当する
  */
 class KotlinDnsInterceptor(
-    private val dnsRepository: DnsRepository,
+    private val dnsRepository: DnsHistoryRepository,
     private val protectSocket: (DatagramSocket) -> Unit
 ) : DnsInterceptor {
 
@@ -182,7 +182,8 @@ class KotlinDnsInterceptor(
     ): ByteArray? {
         val hostName = DnsPacketParser.parseHostName(query)
         if (hostName != null) {
-            dnsRepository.addHistory(hostName)
+            // Service への通知（履歴への追加は Service が行う）
+            dnsRepository.notifyDnsRequest(hostName)
 
             if (dnsRepository.isBlocked(hostName)) {
                 Log.i(TAG, "Blocked DNS Query: $hostName")

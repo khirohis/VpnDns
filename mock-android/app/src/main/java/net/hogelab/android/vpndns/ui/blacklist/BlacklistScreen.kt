@@ -109,7 +109,7 @@ fun BlacklistScreen(
                             )
                         },
                         supportingContent = {
-                            Text("Added at: ${dateFormat.format(Date(entry.addedAt))}")
+                            Text("Added at: ${dateFormat.format(Date(entry.firstTime))}")
                         },
                         trailingContent = {
                             IconButton(onClick = { viewModel.removeEntry(entry.hostName) }) {

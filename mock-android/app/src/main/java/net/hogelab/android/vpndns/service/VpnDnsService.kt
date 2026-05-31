@@ -11,14 +11,19 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import net.hogelab.android.vpndns.MainActivity
 import net.hogelab.android.vpndns.data.dns.KotlinDnsInterceptor
 import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.domain.interceptor.DnsInterceptor
-import net.hogelab.android.vpndns.domain.repository.DnsRepository
+import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
+import net.hogelab.android.vpndns.domain.repository.DnsHistoryRepository
 
 /**
  * VPN インターフェースの確立とサービスライフサイクルの管理を行うクラス
@@ -27,8 +32,11 @@ import net.hogelab.android.vpndns.domain.repository.DnsRepository
 class VpnDnsService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
-    private val dnsRepository: DnsRepository = RepositoryProvider.dnsRepository
+    private val dnsRepository: DnsHistoryRepository = RepositoryProvider.dnsRepository
+    private val blacklistRepository: BlacklistRepository = RepositoryProvider.blacklistRepository
     private lateinit var dnsInterceptor: DnsInterceptor
+    private var historyJob: Job? = null
+    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
 
     companion object {
         private const val TAG = "VpnDnsService"
@@ -45,6 +53,13 @@ class VpnDnsService : VpnService() {
         dnsInterceptor = KotlinDnsInterceptor(dnsRepository) { socket ->
             protect(socket)
         }
+
+        // DNS リクエストイベントを監視して履歴に追加する
+        historyJob = serviceScope.launch {
+            dnsRepository.dnsRequestEvents.collect { hostName ->
+                dnsRepository.addHistory(hostName)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -60,8 +75,8 @@ class VpnDnsService : VpnService() {
     private fun startVpn() {
         if (_connectionState.value) return
 
-        // 前処理としてブラックリストをロード
-        dnsRepository.loadBlacklist(this)
+        // DNS サービス層の責務: 起動時に最新のルールをリロード（ファイル -> メモリ）
+        blacklistRepository.loadBlacklist(this)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
@@ -115,8 +130,8 @@ class VpnDnsService : VpnService() {
             // 処理を停止
             dnsInterceptor.stop()
 
-            // VPN 停止時にブラックリストを保存し、履歴をクリア
-            dnsRepository.saveBlacklist(this)
+            // DNS サービス層の責務: 停止時に現在のメモリ状態を念のため永続化
+            blacklistRepository.saveBlacklist(this)
             dnsRepository.clearHistory()
 
             vpnInterface?.close()
@@ -131,6 +146,7 @@ class VpnDnsService : VpnService() {
 
     override fun onDestroy() {
         stopVpn()
+        historyJob?.cancel()
         super.onDestroy()
     }
 
