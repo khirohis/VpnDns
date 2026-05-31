@@ -14,7 +14,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PauseCircle
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -104,35 +107,73 @@ fun BlacklistScreen(
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 groupedEntries.forEach { (baseDomain, entities) ->
                     stickyHeader {
-                        Box(
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = baseDomain,
                                 style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f)
                             )
+                            IconButton(
+                                onClick = { viewModel.onWildcardShortcutClick(baseDomain) },
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoFixHigh,
+                                    contentDescription = "Wildcard shortcut",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.height(20.dp)
+                                )
+                            }
                         }
                     }
 
                     items(entities) { entry ->
+                        val isPending = entry.isPending
+                        val textColor = if (isPending) {
+                            MaterialTheme.colorScheme.outline
+                        } else if (entry.hostName.contains("*")) {
+                            MaterialTheme.colorScheme.secondary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        }
+
                         ListItem(
                             headlineContent = { 
                                 Text(
                                     text = entry.hostName,
                                     fontFamily = if (entry.hostName.contains("*")) FontFamily.Monospace else FontFamily.Default,
-                                    color = if (entry.hostName.contains("*")) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
+                                    color = textColor,
+                                    style = if (isPending) MaterialTheme.typography.bodyMedium.copy(
+                                        textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough
+                                    ) else MaterialTheme.typography.bodyLarge
                                 )
                             },
                             supportingContent = {
-                                Text("Added at: ${dateFormat.format(Date(entry.firstTime))}")
+                                Text(
+                                    text = "Added at: ${dateFormat.format(Date(entry.firstTime))}${if (isPending) " (Pending)" else ""}",
+                                    color = MaterialTheme.colorScheme.outline,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
                             },
                             trailingContent = {
-                                IconButton(onClick = { viewModel.removeEntry(entry.hostName) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Remove")
+                                Row {
+                                    IconButton(onClick = { viewModel.togglePending(entry.hostName) }) {
+                                        Icon(
+                                            imageVector = if (isPending) Icons.Default.PlayCircle else Icons.Default.PauseCircle,
+                                            contentDescription = if (isPending) "Resume" else "Pause",
+                                            tint = if (isPending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                    IconButton(onClick = { viewModel.removeEntry(entry.hostName) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Remove")
+                                    }
                                 }
                             }
                         )

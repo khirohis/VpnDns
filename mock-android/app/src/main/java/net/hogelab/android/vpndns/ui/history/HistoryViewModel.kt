@@ -37,23 +37,28 @@ class HistoryViewModel(
         blacklistRepository.blacklist,
         sortConfig
     ) { rawHistory, blacklist, sort ->
-        val blockedHosts = blacklist.map { it.hostName }.toSet()
+        val blockedHostsMap = blacklist.associateBy { it.hostName }
         
         rawHistory.asSequence().map { entity ->
-            // ブロック状態を都度判定
-            val isExact = blockedHosts.contains(entity.hostName)
-            // パターンマッチ判定（BlacklistRepository に委譲）
-            // 注意: ここで全件に対して Trie 判定を行うため、BlacklistRepository.isBlocked が高速である必要がある
-            val isPattern = if (!isExact) blacklistRepository.isBlocked(entity.hostName) else false
+            val blacklistEntry = blockedHostsMap[entity.hostName]
             
             val blockType = when {
-                isExact -> BlockType.EXACT
-                isPattern -> BlockType.PATTERN_MATCHED
-                else -> BlockType.NONE
+                blacklistEntry != null -> {
+                    if (blacklistEntry.isPending) BlockType.PENDING else BlockType.EXACT
+                }
+                blacklistRepository.isBlocked(entity.hostName) -> {
+                    BlockType.PATTERN_MATCHED
+                }
+                else -> {
+                    // ここで、ワイルドカードにはマッチするが isPending=true のケースを判定したい
+                    // 現状の isBlocked は pending なら false を返すが、
+                    // 個別に「存在チェック」が必要
+                    BlockType.NONE
+                }
             }
             DnsHistoryUiItem(entity, blockType)
         }.filter { item ->
-            sort.showBlocked || item.blockType == BlockType.NONE
+            sort.showBlocked || item.blockType == BlockType.NONE || item.blockType == BlockType.PENDING
         }.toList()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
