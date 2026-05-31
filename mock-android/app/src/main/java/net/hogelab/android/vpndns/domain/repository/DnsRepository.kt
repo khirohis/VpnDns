@@ -2,8 +2,8 @@ package net.hogelab.android.vpndns.domain.repository
 
 import android.content.Context
 import kotlinx.coroutines.flow.StateFlow
-import net.hogelab.android.vpndns.domain.model.BlacklistEntry
-import net.hogelab.android.vpndns.domain.model.DnsEntry
+import net.hogelab.android.vpndns.domain.model.BlacklistEntity
+import net.hogelab.android.vpndns.domain.model.DnsEntity
 import net.hogelab.android.vpndns.domain.model.HistorySortConfig
 
 /**
@@ -13,12 +13,12 @@ interface DnsRepository {
     /**
      * DNS 履歴 (ブラックリストの状態が反映され、ソート設定に従った順序)
      */
-    val history: StateFlow<List<DnsEntry>>
+    val history: StateFlow<List<DnsEntity>>
 
     /**
      * ブラックリスト一覧
      */
-    val blacklist: StateFlow<List<BlacklistEntry>>
+    val blacklist: StateFlow<List<BlacklistEntity>>
 
     /**
      * 現在のソート設定
