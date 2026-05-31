@@ -5,16 +5,29 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.domain.model.BlacklistEntity
 import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
+import net.hogelab.android.vpndns.domain.util.DomainUtils
 
 class BlacklistViewModel @JvmOverloads constructor(
     application: Application,
     private val repository: BlacklistRepository = RepositoryProvider.blacklistRepository
 ) : AndroidViewModel(application) {
     val entries: StateFlow<List<BlacklistEntity>> = repository.blacklist
+
+    // セカンドレベルドメインごとにグルーピングされたリスト
+    val groupedEntries: StateFlow<Map<String, List<BlacklistEntity>>> = repository.blacklist
+        .map { list ->
+            list.groupBy { DomainUtils.extractBaseDomain(it.hostName) }
+                .toSortedMap()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     var inputHostName by mutableStateOf("")
         private set

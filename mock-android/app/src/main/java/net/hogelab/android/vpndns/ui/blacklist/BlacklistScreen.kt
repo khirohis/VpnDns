@@ -1,5 +1,7 @@
 package net.hogelab.android.vpndns.ui.blacklist
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -35,11 +37,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BlacklistScreen(
     viewModel: BlacklistViewModel = viewModel()
 ) {
-    val entries by viewModel.entries.collectAsState()
+    val groupedEntries by viewModel.groupedEntries.collectAsState()
     val redundantEntries = viewModel.redundantEntries
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -85,7 +88,7 @@ fun BlacklistScreen(
 
         HorizontalDivider()
 
-        if (entries.isEmpty()) {
+        if (groupedEntries.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -99,25 +102,42 @@ fun BlacklistScreen(
         } else {
             val dateFormat = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(entries) { entry ->
-                    ListItem(
-                        headlineContent = { 
+                groupedEntries.forEach { (baseDomain, entities) ->
+                    stickyHeader {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
                             Text(
-                                text = entry.hostName,
-                                fontFamily = if (entry.hostName.contains("*")) FontFamily.Monospace else FontFamily.Default,
-                                color = if (entry.hostName.contains("*")) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
+                                text = baseDomain,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        },
-                        supportingContent = {
-                            Text("Added at: ${dateFormat.format(Date(entry.firstTime))}")
-                        },
-                        trailingContent = {
-                            IconButton(onClick = { viewModel.removeEntry(entry.hostName) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove")
-                            }
                         }
-                    )
-                    HorizontalDivider()
+                    }
+
+                    items(entities) { entry ->
+                        ListItem(
+                            headlineContent = { 
+                                Text(
+                                    text = entry.hostName,
+                                    fontFamily = if (entry.hostName.contains("*")) FontFamily.Monospace else FontFamily.Default,
+                                    color = if (entry.hostName.contains("*")) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
+                                )
+                            },
+                            supportingContent = {
+                                Text("Added at: ${dateFormat.format(Date(entry.firstTime))}")
+                            },
+                            trailingContent = {
+                                IconButton(onClick = { viewModel.removeEntry(entry.hostName) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Remove")
+                                }
+                            }
+                        )
+                        HorizontalDivider()
+                    }
                 }
             }
         }
