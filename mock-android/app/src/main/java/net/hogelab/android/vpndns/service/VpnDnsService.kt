@@ -50,7 +50,7 @@ class VpnDnsService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        dnsInterceptor = KotlinDnsInterceptor(dnsRepository) { socket ->
+        dnsInterceptor = KotlinDnsInterceptor(dnsRepository, blacklistRepository) { socket ->
             protect(socket)
         }
 
