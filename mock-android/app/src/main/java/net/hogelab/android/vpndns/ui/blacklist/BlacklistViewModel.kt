@@ -10,7 +10,7 @@ import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.domain.model.BlacklistEntity
 import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
 
-class BlacklistViewModel(
+class BlacklistViewModel @JvmOverloads constructor(
     application: Application,
     private val repository: BlacklistRepository = RepositoryProvider.blacklistRepository
 ) : AndroidViewModel(application) {
