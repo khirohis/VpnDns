@@ -75,8 +75,9 @@ class VpnDnsService : VpnService() {
     private fun startVpn() {
         if (_connectionState.value) return
 
-        // DNS サービス層の責務: 起動時に最新のルールをリロード（ファイル -> メモリ）
+        // DNS サービス層の責務: 起動時に最新のルールをリロード（ファイル -> メモリ）し、履歴をリセット
         blacklistRepository.loadBlacklist(this)
+        dnsRepository.clearHistory()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
@@ -132,7 +133,6 @@ class VpnDnsService : VpnService() {
 
             // DNS サービス層の責務: 停止時に現在のメモリ状態を念のため永続化
             blacklistRepository.saveBlacklist(this)
-            dnsRepository.clearHistory()
 
             vpnInterface?.close()
             vpnInterface = null
