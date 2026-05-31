@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.hogelab.android.vpndns.domain.interceptor.DnsInterceptor
+import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
 import net.hogelab.android.vpndns.domain.repository.DnsHistoryRepository
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -22,6 +23,7 @@ import java.nio.ByteOrder
  */
 class KotlinDnsInterceptor(
     private val dnsRepository: DnsHistoryRepository,
+    private val blacklistRepository: BlacklistRepository,
     private val protectSocket: (DatagramSocket) -> Unit
 ) : DnsInterceptor {
 
@@ -185,7 +187,7 @@ class KotlinDnsInterceptor(
             // Service への通知（履歴への追加は Service が行う）
             dnsRepository.notifyDnsRequest(hostName)
 
-            if (dnsRepository.isBlocked(hostName)) {
+            if (blacklistRepository.isBlocked(hostName)) {
                 Log.i(TAG, "Blocked DNS Query: $hostName")
                 return buildBlockReply(query)
             }
