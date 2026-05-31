@@ -5,16 +5,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.domain.model.BlacklistEntity
 import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
+import net.hogelab.android.vpndns.domain.util.DomainUtils
 
 class BlacklistViewModel @JvmOverloads constructor(
     application: Application,
     private val repository: BlacklistRepository = RepositoryProvider.blacklistRepository
 ) : AndroidViewModel(application) {
     val entries: StateFlow<List<BlacklistEntity>> = repository.blacklist
+
+    // セカンドレベルドメインごとにグルーピングされたリスト
+    val groupedEntries: StateFlow<Map<String, List<BlacklistEntity>>> = repository.blacklist
+        .map { list ->
+            list.groupBy { DomainUtils.extractBaseDomain(it.hostName) }
+                .toSortedMap()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     var inputHostName by mutableStateOf("")
         private set
@@ -24,6 +38,10 @@ class BlacklistViewModel @JvmOverloads constructor(
 
     fun onInputChange(value: String) {
         inputHostName = value
+    }
+
+    fun onWildcardShortcutClick(baseDomain: String) {
+        inputHostName = "*.$baseDomain"
     }
 
     fun onAddClick() {
@@ -39,17 +57,21 @@ class BlacklistViewModel @JvmOverloads constructor(
         }
         
         repository.addToBlacklist(host)
-        repository.saveBlacklist(getApplication()) // 永続化
+        viewModelScope.launch {
+            repository.saveBlacklist(getApplication()) // 永続化
+        }
         inputHostName = ""
     }
 
     fun confirmAddWithCleanup() {
         val host = inputHostName.trim()
-        redundantEntries?.forEach { 
-            repository.removeFromBlacklist(it)
+        viewModelScope.launch {
+            redundantEntries?.forEach { 
+                repository.removeFromBlacklist(it)
+            }
+            repository.addToBlacklist(host)
+            repository.saveBlacklist(getApplication()) // 永続化
         }
-        repository.addToBlacklist(host)
-        repository.saveBlacklist(getApplication()) // 永続化
         inputHostName = ""
         redundantEntries = null
     }
@@ -68,11 +90,22 @@ class BlacklistViewModel @JvmOverloads constructor(
 
     fun removeEntry(hostName: String) {
         repository.removeFromBlacklist(hostName)
-        repository.saveBlacklist(getApplication()) // 永続化
+        viewModelScope.launch {
+            repository.saveBlacklist(getApplication()) // 永続化
+        }
+    }
+
+    fun togglePending(hostName: String) {
+        repository.togglePending(hostName)
+        viewModelScope.launch {
+            repository.saveBlacklist(getApplication()) // 永続化
+        }
     }
 
     fun clearAll() {
         repository.clearBlacklist()
-        repository.saveBlacklist(getApplication()) // 永続化
+        viewModelScope.launch {
+            repository.saveBlacklist(getApplication()) // 永続化
+        }
     }
 }

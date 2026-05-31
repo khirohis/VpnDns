@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -36,6 +37,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.launch
+import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.service.VpnDnsService
 import net.hogelab.android.vpndns.ui.Screen
 import net.hogelab.android.vpndns.ui.blacklist.BlacklistScreen
@@ -46,6 +49,12 @@ import net.hogelab.android.vpndns.ui.theme.VpnDnsTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // アプリ起動時にブラックリストを非同期で読み込む
+        lifecycleScope.launch {
+            RepositoryProvider.blacklistRepository.loadBlacklist(this@MainActivity)
+        }
+
         enableEdgeToEdge()
         setContent {
             VpnDnsTheme {
