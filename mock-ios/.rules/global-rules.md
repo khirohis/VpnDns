@@ -7,6 +7,7 @@ iOS の `NEPacketTunnelProvider` を利用し、DNS 制御を行うアプリケ�
 ## 技術スタック
 
 - **Language**: Swift (5.9+)
+- **Minimum OS**: iOS 15
 - **UI**: SwiftUI
 - **Architecture**: Clean Architecture / Layered Architecture
   - **domain**: ビジネスロジック、リポジトリ契約 (`domain/repository/`)、およびモデル (`domain/model/`) を含む純粋なSwiftレイヤー。

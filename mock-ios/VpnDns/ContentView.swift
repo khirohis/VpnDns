@@ -63,7 +63,7 @@ struct HomeTab: View {
     @ObservedObject var vpnManager: VpnManager
     
     var body: some View {
-        NavigationStack {
+        NavigationView {
             ScrollView {
                 VStack(spacing: 24) {
                     // Status Shield Card with vibrant gradient background
@@ -176,6 +176,7 @@ struct HomeTab: View {
             #endif
             .navigationTitle("ホーム")
         }
+        .navigationViewStyle(.stack)
     }
     
     private func toggleVpn(to newValue: Bool) {
@@ -244,7 +245,7 @@ struct HistoryTab: View {
     }
     
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 Section {
                     if sortedHistory.isEmpty {
@@ -332,6 +333,7 @@ struct HistoryTab: View {
             }
             .navigationTitle("履歴")
         }
+        .navigationViewStyle(.stack)
     }
     
     // MARK: - Helper Views
@@ -392,7 +394,7 @@ struct BlacklistTab: View {
     }
     
     var body: some View {
-        NavigationStack {
+        NavigationView {
             VStack(spacing: 0) {
                 // Rule addition bar
                 HStack(spacing: 10) {
@@ -515,6 +517,7 @@ struct BlacklistTab: View {
             #endif
             .navigationTitle("リスト")
         }
+        .navigationViewStyle(.stack)
     }
     
     private func addRule() {
@@ -559,7 +562,7 @@ struct SettingsTab: View {
     let upstreamOptions: [String]
     
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 Section {
                     Picker("プロトコル/サーバー", selection: $selectedUpstream) {
@@ -645,6 +648,7 @@ struct SettingsTab: View {
             }
             .navigationTitle("設定")
         }
+        .navigationViewStyle(.stack)
     }
 }
 
