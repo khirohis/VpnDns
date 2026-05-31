@@ -1,17 +1,19 @@
 package net.hogelab.android.vpndns.ui.blacklist
 
+import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.flow.StateFlow
 import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.domain.model.BlacklistEntity
-import net.hogelab.android.vpndns.domain.repository.DnsRepository
+import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
 
 class BlacklistViewModel(
-    private val repository: DnsRepository = RepositoryProvider.dnsRepository
-) : ViewModel() {
+    application: Application,
+    private val repository: BlacklistRepository = RepositoryProvider.blacklistRepository
+) : AndroidViewModel(application) {
     val entries: StateFlow<List<BlacklistEntity>> = repository.blacklist
 
     var inputHostName by mutableStateOf("")
@@ -37,6 +39,7 @@ class BlacklistViewModel(
         }
         
         repository.addToBlacklist(host)
+        repository.saveBlacklist(getApplication()) // 永続化
         inputHostName = ""
     }
 
@@ -46,6 +49,7 @@ class BlacklistViewModel(
             repository.removeFromBlacklist(it)
         }
         repository.addToBlacklist(host)
+        repository.saveBlacklist(getApplication()) // 永続化
         inputHostName = ""
         redundantEntries = null
     }
@@ -64,9 +68,11 @@ class BlacklistViewModel(
 
     fun removeEntry(hostName: String) {
         repository.removeFromBlacklist(hostName)
+        repository.saveBlacklist(getApplication()) // 永続化
     }
 
     fun clearAll() {
         repository.clearBlacklist()
+        repository.saveBlacklist(getApplication()) // 永続化
     }
 }

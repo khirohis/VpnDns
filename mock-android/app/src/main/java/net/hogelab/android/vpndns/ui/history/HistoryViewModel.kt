@@ -1,24 +1,64 @@
 package net.hogelab.android.vpndns.ui.history
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.domain.model.BlockType
-import net.hogelab.android.vpndns.domain.model.DnsEntity
+import net.hogelab.android.vpndns.domain.model.DnsHistoryEntity
 import net.hogelab.android.vpndns.domain.model.HistorySortConfig
 import net.hogelab.android.vpndns.domain.model.SortField
 import net.hogelab.android.vpndns.domain.model.SortOrder
-import net.hogelab.android.vpndns.domain.repository.DnsRepository
+import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
+import net.hogelab.android.vpndns.domain.repository.DnsHistoryRepository
+
+/**
+ * UI 表示用の履歴アイテム
+ */
+data class DnsHistoryUiItem(
+    val entity: DnsHistoryEntity,
+    val blockType: BlockType
+)
 
 class HistoryViewModel(
-    private val repository: DnsRepository = RepositoryProvider.dnsRepository
+    private val historyRepository: DnsHistoryRepository = RepositoryProvider.dnsRepository,
+    private val blacklistRepository: BlacklistRepository = RepositoryProvider.blacklistRepository
 ) : ViewModel() {
 
-    val history: StateFlow<List<DnsEntity>> = repository.history
-    val sortConfig: StateFlow<HistorySortConfig> = repository.sortConfig
+    val sortConfig: StateFlow<HistorySortConfig> = historyRepository.sortConfig
+
+    // 履歴データとブラックリストの状態を結合して UI 用のリストを作成する
+    val history: StateFlow<List<DnsHistoryUiItem>> = combine(
+        historyRepository.history,
+        blacklistRepository.blacklist,
+        sortConfig
+    ) { rawHistory, blacklist, sort ->
+        val blockedHosts = blacklist.map { it.hostName }.toSet()
+        
+        rawHistory.asSequence().map { entity ->
+            // ブロック状態を都度判定
+            val isExact = blockedHosts.contains(entity.hostName)
+            // パターンマッチ判定（BlacklistRepository に委譲）
+            // 注意: ここで全件に対して Trie 判定を行うため、BlacklistRepository.isBlocked が高速である必要がある
+            val isPattern = if (!isExact) blacklistRepository.isBlocked(entity.hostName) else false
+            
+            val blockType = when {
+                isExact -> BlockType.EXACT
+                isPattern -> BlockType.PATTERN_MATCHED
+                else -> BlockType.NONE
+            }
+            DnsHistoryUiItem(entity, blockType)
+        }.filter { item ->
+            sort.showBlocked || item.blockType == BlockType.NONE
+        }.toList()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun clearHistory() {
-        repository.clearHistory()
+        historyRepository.clearHistory()
     }
 
     fun onSortFieldSelected(field: SortField) {
@@ -26,22 +66,23 @@ class HistoryViewModel(
         val newOrder = if (current.field == field) {
             if (current.order == SortOrder.ASCENDING) SortOrder.DESCENDING else SortOrder.ASCENDING
         } else {
-            // フィールドが変わった場合は、時間系なら降順、名前なら昇順をデフォルトにするなどの工夫も可能
             if (field == SortField.HOST_NAME) SortOrder.ASCENDING else SortOrder.DESCENDING
         }
-        repository.setSortConfig(current.copy(field = field, order = newOrder))
+        historyRepository.setSortConfig(current.copy(field = field, order = newOrder))
     }
 
     fun toggleShowBlocked() {
         val current = sortConfig.value
-        repository.setSortConfig(current.copy(showBlocked = !current.showBlocked))
+        historyRepository.setSortConfig(current.copy(showBlocked = !current.showBlocked))
     }
 
-    fun toggleBlock(entity: DnsEntity) {
-        if (entity.blockType == BlockType.NONE) {
-            repository.addToBlacklist(entity.hostName)
-        } else if (entity.blockType == BlockType.EXACT) {
-            repository.removeFromBlacklist(entity.hostName)
+    fun toggleBlock(item: DnsHistoryUiItem) {
+        viewModelScope.launch {
+            if (item.blockType == BlockType.NONE) {
+                blacklistRepository.addToBlacklist(item.entity.hostName)
+            } else if (item.blockType == BlockType.EXACT) {
+                blacklistRepository.removeFromBlacklist(item.entity.hostName)
+            }
         }
     }
 }
