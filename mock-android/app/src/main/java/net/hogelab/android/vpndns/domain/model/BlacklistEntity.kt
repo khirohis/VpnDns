@@ -5,5 +5,6 @@ package net.hogelab.android.vpndns.domain.model
  */
 data class BlacklistEntity(
     val hostName: String,
-    val firstTime: Long
+    val firstTime: Long,
+    val isPending: Boolean = false
 )

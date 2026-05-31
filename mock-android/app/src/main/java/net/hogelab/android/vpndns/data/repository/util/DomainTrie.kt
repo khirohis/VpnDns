@@ -10,6 +10,7 @@ class DomainTrie {
     private class Node {
         val children = ConcurrentHashMap<String, Node>()
         var isWildcardMatch = false // ここでワイルドカード（*）による終端か
+        var isPending = false
     }
 
     private val root = Node()
@@ -17,12 +18,13 @@ class DomainTrie {
     /**
      * パターンを登録する（例: "*.google.com"）
      */
-    fun insert(pattern: String) {
+    fun insert(pattern: String, isPending: Boolean = false) {
         val labels = pattern.split(".").reversed()
         var current = root
         for (label in labels) {
             if (label == "*") {
                 current.isWildcardMatch = true
+                current.isPending = isPending
                 return
             }
             current = current.children.getOrPut(label) { Node() }
@@ -57,19 +59,19 @@ class DomainTrie {
     }
 
     /**
-     * 指定されたホスト名が登録済みのワイルドカードパターンに合致するか判定する
+     * 指定されたホスト名が登録済みの有効な（isPending=false）ワイルドカードパターンに合致するか判定する
      */
     fun matches(hostName: String): Boolean {
         val labels = hostName.split(".").reversed()
         var current = root
         
-        // 途中で isWildcardMatch が true になればヒット
+        // 途中で isWildcardMatch が true かつ isPending が false になればヒット
         for (label in labels) {
-            if (current.isWildcardMatch) return true
+            if (current.isWildcardMatch && !current.isPending) return true
             current = current.children[label] ?: return false
         }
         
-        return current.isWildcardMatch
+        return current.isWildcardMatch && !current.isPending
     }
 
     fun clear() {

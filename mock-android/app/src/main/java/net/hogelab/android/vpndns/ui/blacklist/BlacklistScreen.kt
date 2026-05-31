@@ -1,5 +1,7 @@
 package net.hogelab.android.vpndns.ui.blacklist
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +14,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PauseCircle
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -35,11 +40,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BlacklistScreen(
     viewModel: BlacklistViewModel = viewModel()
 ) {
-    val entries by viewModel.entries.collectAsState()
+    val groupedEntries by viewModel.groupedEntries.collectAsState()
     val redundantEntries = viewModel.redundantEntries
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -85,7 +91,7 @@ fun BlacklistScreen(
 
         HorizontalDivider()
 
-        if (entries.isEmpty()) {
+        if (groupedEntries.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -99,25 +105,80 @@ fun BlacklistScreen(
         } else {
             val dateFormat = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(entries) { entry ->
-                    ListItem(
-                        headlineContent = { 
+                groupedEntries.forEach { (baseDomain, entities) ->
+                    stickyHeader {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = entry.hostName,
-                                fontFamily = if (entry.hostName.contains("*")) FontFamily.Monospace else FontFamily.Default,
-                                color = if (entry.hostName.contains("*")) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurface
+                                text = baseDomain,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f)
                             )
-                        },
-                        supportingContent = {
-                            Text("Added at: ${dateFormat.format(Date(entry.firstTime))}")
-                        },
-                        trailingContent = {
-                            IconButton(onClick = { viewModel.removeEntry(entry.hostName) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove")
+                            IconButton(
+                                onClick = { viewModel.onWildcardShortcutClick(baseDomain) },
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoFixHigh,
+                                    contentDescription = "Wildcard shortcut",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.height(20.dp)
+                                )
                             }
                         }
-                    )
-                    HorizontalDivider()
+                    }
+
+                    items(entities) { entry ->
+                        val isPending = entry.isPending
+                        val textColor = if (isPending) {
+                            MaterialTheme.colorScheme.outline
+                        } else if (entry.hostName.contains("*")) {
+                            MaterialTheme.colorScheme.secondary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        }
+
+                        ListItem(
+                            headlineContent = { 
+                                Text(
+                                    text = entry.hostName,
+                                    fontFamily = if (entry.hostName.contains("*")) FontFamily.Monospace else FontFamily.Default,
+                                    color = textColor,
+                                    style = if (isPending) MaterialTheme.typography.bodyMedium.copy(
+                                        textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough
+                                    ) else MaterialTheme.typography.bodyLarge
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    text = "Added at: ${dateFormat.format(Date(entry.firstTime))}${if (isPending) " (Pending)" else ""}",
+                                    color = MaterialTheme.colorScheme.outline,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            trailingContent = {
+                                Row {
+                                    IconButton(onClick = { viewModel.togglePending(entry.hostName) }) {
+                                        Icon(
+                                            imageVector = if (isPending) Icons.Default.PlayCircle else Icons.Default.PauseCircle,
+                                            contentDescription = if (isPending) "Resume" else "Pause",
+                                            tint = if (isPending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                    IconButton(onClick = { viewModel.removeEntry(entry.hostName) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Remove")
+                                    }
+                                }
+                            }
+                        )
+                        HorizontalDivider()
+                    }
                 }
             }
         }

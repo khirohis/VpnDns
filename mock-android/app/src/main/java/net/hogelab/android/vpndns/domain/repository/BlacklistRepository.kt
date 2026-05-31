@@ -29,6 +29,11 @@ interface BlacklistRepository {
     fun isBlocked(hostName: String): Boolean
 
     /**
+     * ブラックリストの保留状態を切り替える
+     */
+    fun togglePending(hostName: String)
+
+    /**
      * ブラックリストをクリアする
      */
     fun clearBlacklist()
@@ -36,10 +41,10 @@ interface BlacklistRepository {
     /**
      * ブラックリストをファイルに保存する
      */
-    fun saveBlacklist(context: Context)
+    suspend fun saveBlacklist(context: Context)
 
     /**
      * ブラックリストをファイルから読み込む
      */
-    fun loadBlacklist(context: Context)
+    suspend fun loadBlacklist(context: Context)
 }
