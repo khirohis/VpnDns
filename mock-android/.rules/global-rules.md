@@ -23,7 +23,7 @@ DNS リクエストはそのリクエスト timestamp や回数などを History
 - 複雑なロジックやプロトコル処理（DNS パケットパース等）には KDoc を記述する。
 
 ### 2. VpnService 実装
-- **責務**: `DnsVpnService` はパケットのルーティングとライフサイクル管理に専念し、DNS パケット処理は独立したオブジェクトに分離すること。
+- **責務**: `VpnDnsService` はパケットのルーティングとライフサイクル管理に専念し、DNS パケット処理は独立したオブジェクトに分離すること。
 - **Foreground Service**: Android 14 以降の制約に従い、`AndroidManifest.xml` で `android:foregroundServiceType="specialUse"` を指定し、適切な権限とプロパティを記述すること。
 - **Lifecycle**: VPN の接続状態を UI や他のコンポーネントが監視できるよう、接続状態は `StateFlow` 等で公開する。
 - **Resource Management**: 
@@ -35,8 +35,8 @@ DNS リクエストはそのリクエスト timestamp や回数などを History
 - **検索パフォーマンス**:
     - ブラックリストの判定はパケット処理ループ内で行われるため、判定ロジックは **O(1)** の計算量で実行できるよう高速なデータ構造を使用すること。
     - ただしワイルドカード判定においてはその限りではなく **Trie** 木など、なるべく高速に行えるよう配慮すること。
-- **遮断戦略**: ブロック対象のリクエストに対しては、単にパケットを破棄するのではなく、即座に **NXDOMAIN** (RCODE 3) 等の DNS 応答を返却することで、クライアント側のタイムアウト待ちを回避し UX を向上させること。
-- **UI通知**: DNS リクエストとその判定結果はイベントとして UI に通知すること。
+- **遮断戦略**: ブロック対象のリクエストに対しては、単にパケットを破棄するのではなく、元のクエリの Transaction ID を維持し、質問セクションをコピーした上で RCODE 3 を設定した有効な DNS パケットを構築すること。
+- **UI通知**: DNS リクエストとその判定結果はイベントとして Service に通知し Service が History を更新すること。
 - **スレッド安全性**: 
     - TUN インターフェースへの書き込み（`output.write`）は `synchronized` 等で適切に排他制御を行うこと。
     - 書き込み処理は VPN 停止（ストリームのクローズ）と競合する可能性があるため、必ず `try-catch` で保護すること。
@@ -45,13 +45,13 @@ DNS リクエストはそのリクエスト timestamp や回数などを History
     - IPv6 環境での名前解決（DNS Leak）を防ぐため、IPv6 アドレスおよび IPv6 DNS サーバーのフックを必須とする。
 
 ### 4. History 管理
-- **統計情報**: History （`DnsEntity`) には host 名 (`hostName`) と初回リクエストのタイムスタンプ (`firstTime`)、最終リクエストのタイムスタンプ (`accessTime`)、リクエスト回数 (`requestCount`) を保持する。 
+- **統計情報**: History （`DnsHistoryEntity`) には host 名 (`hostName`) と初回リクエストのタイムスタンプ (`firstTime`)、最終リクエストのタイムスタンプ (`accessTime`)、リクエスト回数 (`requestCount`) を保持する。 
 - **保持戦略**:
     - History は永続化せず VpnService の start でクリアする。
     - History の上限は 500 件までとし、それを超えた場合は最終リクエストの accessTime が古い順に削除する。
 
 ### 5. Blacklist 管理
-- **統計情報**: Blacklist （`BlacklistEntity`) には host 名 (`hostName`) と初回リクエストのタイムスタンプ (`firstTime`) を保持する。
+- **統計情報**: Blacklist （`BlacklistEntity`) には host 名 (`hostName`) と初回リクエストのタイムスタンプ (`firstTime`)、一時的解除 (`isPending`) を保持する。
 - **保持戦略**: Blacklist への追加、削除があった場合はテキストファイルとして永続化し、更新があったことをイベントとして DNS 処理に通知すること。
 
 ### 6. データ管理と UI 連携
