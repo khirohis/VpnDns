@@ -1,0 +1,4 @@
+*.o
+
+VpnDns.xcodeproj/xcuserdata/
+VpnDns.xcodeproj/project.xcworkspace/
