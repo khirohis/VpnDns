@@ -29,7 +29,8 @@ public class VpnManager: ObservableObject {
     private var pollingTimer: Timer?
     
     // アプリのグループIDやExtensionのBundle IDを設定
-    private let providerBundleIdentifier = "com.khirohis.VpnDns.PacketTunnel"
+    private let groupBundleIdentifier = "net.hogelab.ios.VpnDnsApp"
+    private let providerBundleIdentifier = "net.hogelab.ios.VpnDnsApp.extension"
     
     private init() {
         // VPNの接続状態の変更通知を監視

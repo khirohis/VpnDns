@@ -484,7 +484,7 @@ public struct DnsPacketParser {
             sum = (sum & 0xFFFF) + (sum >> 16)
         }
         
-        return UInt16(~sum)
+        return ~UInt16(sum)
     }
     
     /// IPv4 UDP 擬似ヘッダーを用いたチェックサムの計算
