@@ -36,7 +36,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import net.hogelab.android.vpndns.service.DnsVpnService
+import net.hogelab.android.vpndns.service.VpnDnsService
 import net.hogelab.android.vpndns.ui.Screen
 import net.hogelab.android.vpndns.ui.blacklist.BlacklistScreen
 import net.hogelab.android.vpndns.ui.bottomNavItems
@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startVpnService() {
-        val intent = Intent(this, DnsVpnService::class.java)
+        val intent = Intent(this, VpnDnsService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
@@ -86,7 +86,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopVpn() {
-        val intent = Intent(this, DnsVpnService::class.java).apply {
+        val intent = Intent(this, VpnDnsService::class.java).apply {
             action = "STOP"
         }
         startService(intent)
@@ -164,7 +164,7 @@ fun VpnControlScreen(
     onStartVpn: () -> Unit,
     onStopVpn: () -> Unit
 ) {
-    val isConnected by DnsVpnService.connectionState.collectAsState()
+    val isConnected by VpnDnsService.connectionState.collectAsState()
 
     // Android 13+ Notification Permission Launcher
     val permissionLauncher = rememberLauncherForActivityResult(

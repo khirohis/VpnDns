@@ -10,9 +10,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import net.hogelab.android.vpndns.domain.model.BlacklistEntry
+import net.hogelab.android.vpndns.domain.model.BlacklistEntity
 import net.hogelab.android.vpndns.domain.model.BlockType
-import net.hogelab.android.vpndns.domain.model.DnsEntry
+import net.hogelab.android.vpndns.domain.model.DnsEntity
 import net.hogelab.android.vpndns.domain.model.HistorySortConfig
 import net.hogelab.android.vpndns.domain.model.SortField
 import net.hogelab.android.vpndns.domain.model.SortOrder
@@ -26,43 +26,49 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class InMemoryDnsRepository : DnsRepository {
 
-    private val repositoryScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val repositoryScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     // 履歴の「素」のデータ
-    private val historyMap = ConcurrentHashMap<String, DnsEntry>()
-    private val _rawHistory = MutableStateFlow<Map<String, DnsEntry>>(emptyMap())
+    private val historyMap = ConcurrentHashMap<String, DnsEntity>()
+    private val _rawHistory = MutableStateFlow<Map<String, DnsEntity>>(emptyMap())
 
     // ブラックリストのデータ
-    private val blockedMap = ConcurrentHashMap<String, BlacklistEntry>()
+    private val blockedMap = ConcurrentHashMap<String, BlacklistEntity>()
     private val wildcardTrie = DomainTrie()
-    private val _rawBlacklist = MutableStateFlow<List<BlacklistEntry>>(emptyList())
+    private val _rawBlacklist = MutableStateFlow<List<BlacklistEntity>>(emptyList())
 
     private val _sortConfig = MutableStateFlow(HistorySortConfig())
     override val sortConfig: StateFlow<HistorySortConfig> = _sortConfig.asStateFlow()
 
     // ブラックリスト (StateFlow)
-    override val blacklist: StateFlow<List<BlacklistEntry>> = _rawBlacklist.asStateFlow()
+    override val blacklist: StateFlow<List<BlacklistEntity>> = _rawBlacklist.asStateFlow()
 
     // 履歴 (StateFlow): 履歴データ、ブラックリスト、ソート設定を結合して生成
-    override val history: StateFlow<List<DnsEntry>> = combine(
+    override val history: StateFlow<List<DnsEntity>> = combine(
         _rawHistory,
         blacklist,
         sortConfig
     ) { rawMap, blockedList, sort ->
         val blockedHosts = blockedList.map { it.hostName }.toSet()
-        rawMap.values.asSequence().map { entry ->
-            val isExact = blockedHosts.contains(entry.hostName)
-            val isPattern = if (!isExact) wildcardTrie.matches(entry.hostName) else false
+        val currentTrie = wildcardTrie // スナップショット的な利用 (Trie内部はConcurrent)
+
+        rawMap.values.asSequence().map { entity ->
+            val isExact = blockedHosts.contains(entity.hostName)
+            val isPattern = if (!isExact) currentTrie.matches(entity.hostName) else false
             
-            entry.copy(
-                blockType = when {
-                    isExact -> BlockType.EXACT
-                    isPattern -> BlockType.PATTERN_MATCHED
-                    else -> BlockType.NONE
-                }
-            )
-        }.filter { entry ->
-            sort.showBlocked || entry.blockType == BlockType.NONE
+            val newBlockType = when {
+                isExact -> BlockType.EXACT
+                isPattern -> BlockType.PATTERN_MATCHED
+                else -> BlockType.NONE
+            }
+
+            if (entity.blockType != newBlockType) {
+                entity.copy(blockType = newBlockType)
+            } else {
+                entity
+            }
+        }.filter { entity ->
+            sort.showBlocked || entity.blockType == BlockType.NONE
         }.sortedWith { a, b ->
             val result = when (sort.field) {
                 SortField.FIRST_SEEN -> a.firstSeen.compareTo(b.firstSeen)
@@ -72,7 +78,7 @@ class InMemoryDnsRepository : DnsRepository {
             }
             if (sort.order == SortOrder.ASCENDING) result else -result
         }.toList()
-    }.stateIn(repositoryScope, SharingStarted.Eagerly, emptyList())
+    }.stateIn(repositoryScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     override fun addHistory(host: String) {
         val now = System.currentTimeMillis()
@@ -84,7 +90,7 @@ class InMemoryDnsRepository : DnsRepository {
                 requestCount = existing.requestCount + 1
             )
         } else {
-            historyMap[host] = DnsEntry(
+            historyMap[host] = DnsEntity(
                 hostName = host,
                 firstSeen = now,
                 lastSeen = now,
@@ -102,7 +108,7 @@ class InMemoryDnsRepository : DnsRepository {
     override fun addToBlacklist(hostName: String) {
         if (blockedMap.containsKey(hostName)) return
         
-        blockedMap[hostName] = BlacklistEntry(
+        blockedMap[hostName] = BlacklistEntity(
             hostName = hostName,
             addedAt = System.currentTimeMillis()
         )
@@ -165,7 +171,7 @@ class InMemoryDnsRepository : DnsRepository {
                     if (parts.size == 2) {
                         val hostName = parts[0]
                         val addedAt = parts[1].toLongOrNull() ?: System.currentTimeMillis()
-                        blockedMap[hostName] = BlacklistEntry(hostName, addedAt)
+                        blockedMap[hostName] = BlacklistEntity(hostName, addedAt)
                         
                         if (hostName.contains("*")) {
                             wildcardTrie.insert(hostName)

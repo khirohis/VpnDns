@@ -20,7 +20,7 @@ enum class BlockType {
     PATTERN_MATCHED // パターン一致ブロック
 }
 
-data class DnsEntry(
+data class DnsEntity(
     val hostName: String,
     val firstSeen: Long,
     val lastSeen: Long,

@@ -19,7 +19,7 @@
         android:theme="@style/Theme.VpnDns">
 
         <service
-            android:name=".service.DnsVpnService"
+            android:name=".service.VpnDnsService"
             android:exported="false"
             android:foregroundServiceType="specialUse"
             android:permission="android.permission.BIND_VPN_SERVICE">
