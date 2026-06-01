@@ -182,14 +182,14 @@ class KotlinDnsInterceptor(
         serverAddr: InetAddress,
         isIPv6: Boolean
     ): ByteArray? {
-        val hostName = DnsPacketParser.parseHostName(query)
-        if (hostName != null) {
+        val dnsQuery = DnsPacketParser.parseQuery(query)
+        if (dnsQuery != null) {
             // Service への通知（履歴への追加は Service が行う）
-            dnsRepository.notifyDnsRequest(hostName)
+            dnsRepository.notifyDnsRequest(dnsQuery.hostName)
 
-            if (blacklistRepository.isBlocked(hostName)) {
-                Log.i(TAG, "Blocked DNS Query: $hostName")
-                return buildBlockReply(query)
+            if (blacklistRepository.isBlocked(dnsQuery.hostName)) {
+                Log.i(TAG, "Blocked DNS Query: ${dnsQuery.hostName}")
+                return buildBlockReply(dnsQuery)
             }
         }
 
@@ -226,14 +226,31 @@ class KotlinDnsInterceptor(
         }
     }
 
-    private fun buildBlockReply(query: ByteArray): ByteArray {
-        val responseData = query.copyOf()
-        if (responseData.size >= 4) {
-            // Flags: 0x8183 (Standard query response, No such name)
-            responseData[2] = 0x81.toByte()
-            responseData[3] = 0x83.toByte()
-        }
-        return responseData
+    private fun buildBlockReply(query: DnsQuery): ByteArray {
+        val totalLen = 12 + query.rawQuestionSection.size
+        val response = ByteArray(totalLen)
+        val buffer = ByteBuffer.wrap(response)
+        buffer.order(ByteOrder.BIG_ENDIAN)
+
+        // 1. Header (12 bytes)
+        buffer.putShort(query.transactionId)
+        
+        // Flags: 0x8183 (Standard response, NXDOMAIN)
+        // クライアントの RD (Recursion Desired) ビットを維持しつつ、
+        // QR (Response)=1, RA (Recursion Available)=1, RCODE=3 を設定
+        val rdBit = if ((query.flags.toInt() and 0x0100) != 0) 0x0100 else 0
+        val flags = (0x8000 or rdBit or 0x0080 or 0x0003).toShort()
+        buffer.putShort(flags)
+
+        buffer.putShort(1.toShort()) // QDCOUNT (1)
+        buffer.putShort(0.toShort()) // ANCOUNT (0)
+        buffer.putShort(0.toShort()) // NSCOUNT (0)
+        buffer.putShort(0.toShort()) // ARCOUNT (0)
+
+        // 2. Question Section (解析時に保存したものをそのままコピー)
+        buffer.put(query.rawQuestionSection)
+
+        return response
     }
 
     private fun formatIp(ip: ByteArray): String {
@@ -253,7 +270,8 @@ class KotlinDnsInterceptor(
         dstPort: Int,
         data: ByteArray
     ): ByteArray {
-        val totalLen = 20 + 8 + data.size
+        val udpLen = 8 + data.size
+        val totalLen = 20 + udpLen
         val packet = ByteArray(totalLen)
         val buffer = ByteBuffer.wrap(packet)
         buffer.order(ByteOrder.BIG_ENDIAN)
@@ -276,10 +294,15 @@ class KotlinDnsInterceptor(
         // UDP Header
         buffer.putShort(srcPort.toShort())
         buffer.putShort(dstPort.toShort())
-        buffer.putShort((8 + data.size).toShort())
-        buffer.putShort(0.toShort()) // Optional in IPv4
+        buffer.putShort(udpLen.toShort())
+        buffer.putShort(0.toShort()) // Checksum Placeholder
 
         buffer.put(data)
+
+        // UDP Checksum (IPv4 Pseudo Header)
+        val udpChecksum = calculateUdpChecksumV4(srcIp, dstIp, packet, 20, udpLen)
+        buffer.putShort(20 + 6, udpChecksum)
+
         return packet
     }
 
@@ -290,15 +313,15 @@ class KotlinDnsInterceptor(
         dstPort: Int,
         data: ByteArray
     ): ByteArray {
-        val payloadLen = 8 + data.size
-        val totalLen = 40 + payloadLen
+        val udpLen = 8 + data.size
+        val totalLen = 40 + udpLen
         val packet = ByteArray(totalLen)
         val buffer = ByteBuffer.wrap(packet)
         buffer.order(ByteOrder.BIG_ENDIAN)
 
         // IP Header (v6)
         buffer.putInt(0x60000000) // Version 6, Traffic Class 0, Flow Label 0
-        buffer.putShort(payloadLen.toShort())
+        buffer.putShort(udpLen.toShort())
         buffer.put(17.toByte()) // Next Header: UDP
         buffer.put(64.toByte()) // Hop Limit
         buffer.put(srcIp)
@@ -307,13 +330,21 @@ class KotlinDnsInterceptor(
         // UDP Header
         buffer.putShort(srcPort.toShort())
         buffer.putShort(dstPort.toShort())
-        buffer.putShort(payloadLen.toShort())
+        buffer.putShort(udpLen.toShort())
         buffer.putShort(0.toShort()) // Checksum Placeholder
 
         buffer.put(data)
+
+        // UDP Checksum (IPv6 Pseudo Header - Mandatory)
+        val udpChecksum = calculateUdpChecksumV6(srcIp, dstIp, packet, 40, udpLen)
+        buffer.putShort(40 + 6, udpChecksum)
+
         return packet
     }
 
+    /**
+     * IP ヘッダー用のチェックサム計算 (RFC 791)
+     */
     private fun calculateChecksum(data: ByteArray, offset: Int, length: Int): Short {
         var sum = 0
         var i = offset
@@ -330,5 +361,80 @@ class KotlinDnsInterceptor(
             sum = (sum and 0xFFFF) + (sum shr 16)
         }
         return (sum.inv() and 0xFFFF).toShort()
+    }
+
+    /**
+     * IPv4 疑似ヘッダーを含む UDP チェックサム計算
+     */
+    private fun calculateUdpChecksumV4(
+        srcIp: ByteArray,
+        dstIp: ByteArray,
+        udpPacket: ByteArray,
+        udpOffset: Int,
+        udpLen: Int
+    ): Short {
+        var sum = 0
+        // Pseudo Header
+        for (i in 0 until 4 step 2) {
+            sum += ((srcIp[i].toInt() and 0xFF) shl 8) or (srcIp[i + 1].toInt() and 0xFF)
+            sum += ((dstIp[i].toInt() and 0xFF) shl 8) or (dstIp[i + 1].toInt() and 0xFF)
+        }
+        sum += 17 // Protocol UDP
+        sum += udpLen
+
+        // UDP Header + Data
+        return calculateCombinedChecksum(sum, udpPacket, udpOffset, udpLen)
+    }
+
+    /**
+     * IPv6 疑似ヘッダーを含む UDP チェックサム計算 (必須)
+     */
+    private fun calculateUdpChecksumV6(
+        srcIp: ByteArray,
+        dstIp: ByteArray,
+        udpPacket: ByteArray,
+        udpOffset: Int,
+        udpLen: Int
+    ): Short {
+        var sum = 0
+        // Pseudo Header (Addresses)
+        for (i in 0 until 16 step 2) {
+            sum += ((srcIp[i].toInt() and 0xFF) shl 8) or (srcIp[i + 1].toInt() and 0xFF)
+            // 32bitを超えた桁上がりを16bit幅で考慮する必要があるため、計算の過程で正規化
+            if ((sum shr 16) != 0) sum = (sum and 0xFFFF) + (sum shr 16)
+            
+            sum += ((dstIp[i].toInt() and 0xFF) shl 8) or (dstIp[i + 1].toInt() and 0xFF)
+            if ((sum shr 16) != 0) sum = (sum and 0xFFFF) + (sum shr 16)
+        }
+        // Pseudo Header (Upper-Layer Packet Length)
+        sum += udpLen
+        if ((sum shr 16) != 0) sum = (sum and 0xFFFF) + (sum shr 16)
+        
+        // Pseudo Header (Next Header)
+        sum += 17 // UDP
+        if ((sum shr 16) != 0) sum = (sum and 0xFFFF) + (sum shr 16)
+
+        // UDP Header + Data
+        return calculateCombinedChecksum(sum, udpPacket, udpOffset, udpLen)
+    }
+
+    private fun calculateCombinedChecksum(initialSum: Int, data: ByteArray, offset: Int, length: Int): Short {
+        var sum = initialSum
+        var i = offset
+        var len = length
+        while (len > 1) {
+            sum += ((data[i].toInt() and 0xFF) shl 8) or (data[i + 1].toInt() and 0xFF)
+            i += 2
+            len -= 2
+        }
+        if (len > 0) {
+            sum += (data[i].toInt() and 0xFF) shl 8
+        }
+        while ((sum shr 16) != 0) {
+            sum = (sum and 0xFFFF) + (sum shr 16)
+        }
+        val result = (sum.inv() and 0xFFFF).toShort()
+        // UDP checksum 0 is transmitted as 0xFFFF in IPv6 (and IPv4)
+        return if (result == 0.toShort()) 0xFFFF.toShort() else result
     }
 }
