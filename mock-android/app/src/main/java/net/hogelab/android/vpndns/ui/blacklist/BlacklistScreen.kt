@@ -26,6 +26,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import net.hogelab.android.vpndns.domain.model.BlacklistEntity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -45,7 +49,9 @@ import java.util.Locale
 fun BlacklistScreen(
     viewModel: BlacklistViewModel = viewModel()
 ) {
+    val viewMode by viewModel.viewMode.collectAsState()
     val groupedEntries by viewModel.groupedEntries.collectAsState()
+    val chronologicalEntries by viewModel.chronologicalEntries.collectAsState()
     val redundantEntries = viewModel.redundantEntries
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -89,9 +95,31 @@ fun BlacklistScreen(
             }
         }
 
+        // 表示モード切り替え
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            SegmentedButton(
+                selected = viewMode == BlacklistViewMode.GROUPED,
+                onClick = { viewModel.onViewModeChange(BlacklistViewMode.GROUPED) },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+            ) {
+                Text("Domain Group")
+            }
+            SegmentedButton(
+                selected = viewMode == BlacklistViewMode.CHRONOLOGICAL,
+                onClick = { viewModel.onViewModeChange(BlacklistViewMode.CHRONOLOGICAL) },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+            ) {
+                Text("Latest First")
+            }
+        }
+
         HorizontalDivider()
 
-        if (groupedEntries.isEmpty()) {
+        if (chronologicalEntries.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -105,79 +133,43 @@ fun BlacklistScreen(
         } else {
             val dateFormat = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                groupedEntries.forEach { (baseDomain, entities) ->
-                    stickyHeader {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = baseDomain,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = { viewModel.onWildcardShortcutClick(baseDomain) },
-                                modifier = Modifier.height(32.dp)
+                if (viewMode == BlacklistViewMode.GROUPED) {
+                    groupedEntries.forEach { (baseDomain, entities) ->
+                        stickyHeader(key = "header_$baseDomain") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoFixHigh,
-                                    contentDescription = "Wildcard shortcut",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.height(20.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    items(entities) { entry ->
-                        val isPending = entry.isPending
-                        val textColor = if (isPending) {
-                            MaterialTheme.colorScheme.outline
-                        } else if (entry.hostName.contains("*")) {
-                            MaterialTheme.colorScheme.secondary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        }
-
-                        ListItem(
-                            headlineContent = { 
                                 Text(
-                                    text = entry.hostName,
-                                    fontFamily = if (entry.hostName.contains("*")) FontFamily.Monospace else FontFamily.Default,
-                                    color = textColor,
-                                    style = if (isPending) MaterialTheme.typography.bodyMedium.copy(
-                                        textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough
-                                    ) else MaterialTheme.typography.bodyLarge
+                                    text = baseDomain,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
                                 )
-                            },
-                            supportingContent = {
-                                Text(
-                                    text = "Added at: ${dateFormat.format(Date(entry.firstTime))}${if (isPending) " (Pending)" else ""}",
-                                    color = MaterialTheme.colorScheme.outline,
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            },
-                            trailingContent = {
-                                Row {
-                                    IconButton(onClick = { viewModel.togglePending(entry.hostName) }) {
-                                        Icon(
-                                            imageVector = if (isPending) Icons.Default.PlayCircle else Icons.Default.PauseCircle,
-                                            contentDescription = if (isPending) "Resume" else "Pause",
-                                            tint = if (isPending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                                        )
-                                    }
-                                    IconButton(onClick = { viewModel.removeEntry(entry.hostName) }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Remove")
-                                    }
+                                IconButton(
+                                    onClick = { viewModel.onWildcardShortcutClick(baseDomain) },
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoFixHigh,
+                                        contentDescription = "Wildcard shortcut",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.height(20.dp)
+                                    )
                                 }
                             }
-                        )
-                        HorizontalDivider()
+                        }
+
+                        items(entities, key = { "item_${it.hostName}" }) { entry ->
+                            BlacklistEntryItem(entry, viewModel, dateFormat)
+                        }
+                    }
+                } else {
+                    items(chronologicalEntries, key = { "item_${it.hostName}" }) { entry ->
+                        BlacklistEntryItem(entry, viewModel, dateFormat)
                     }
                 }
             }
@@ -215,4 +207,55 @@ fun BlacklistScreen(
             }
         )
     }
+}
+
+@Composable
+fun BlacklistEntryItem(
+    entry: BlacklistEntity,
+    viewModel: BlacklistViewModel,
+    dateFormat: SimpleDateFormat
+) {
+    val isPending = entry.isPending
+    val textColor = if (isPending) {
+        MaterialTheme.colorScheme.outline
+    } else if (entry.hostName.contains("*")) {
+        MaterialTheme.colorScheme.secondary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    ListItem(
+        headlineContent = {
+            Text(
+                text = entry.hostName,
+                fontFamily = if (entry.hostName.contains("*")) FontFamily.Monospace else FontFamily.Default,
+                color = textColor,
+                style = if (isPending) MaterialTheme.typography.bodyMedium.copy(
+                    textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough
+                ) else MaterialTheme.typography.bodyLarge
+            )
+        },
+        supportingContent = {
+            Text(
+                text = "Added at: ${dateFormat.format(Date(entry.firstTime))}${if (isPending) " (Pending)" else ""}",
+                color = MaterialTheme.colorScheme.outline,
+                style = MaterialTheme.typography.labelSmall
+            )
+        },
+        trailingContent = {
+            Row {
+                IconButton(onClick = { viewModel.togglePending(entry.hostName) }) {
+                    Icon(
+                        imageVector = if (isPending) Icons.Default.PlayCircle else Icons.Default.PauseCircle,
+                        contentDescription = if (isPending) "Resume" else "Pause",
+                        tint = if (isPending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                    )
+                }
+                IconButton(onClick = { viewModel.removeEntry(entry.hostName) }) {
+                    Icon(Icons.Default.Delete, contentDescription = "Remove")
+                }
+            }
+        }
+    )
+    HorizontalDivider()
 }
