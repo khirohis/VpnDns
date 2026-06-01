@@ -1,8 +1,8 @@
 # VpnDns プロジェクト開発ルール
 
 ## プロジェクト概要
-Android システムの DNS リクエストを `VpnService` を利用してフックし、 Blacklist 条件にマッチした host は NXDOMAIN を返すことにより、利用したくない通信をブロックするアプリケーション。
-DNS リクエストはそのリクエスト timestamp や回数などを History 管理し、ユーザはその情報から Blacklist 登録/削除が行える。
+Android システムの DNS クエリを `VpnService` を利用してフックし、 Blacklist 条件にマッチした host は NXDOMAIN を返すことにより、利用したくない通信をブロックするアプリケーション。
+DNS クエリはその timestamp や回数などを History 管理し、ユーザはその情報から Blacklist 登録/削除が行える。
 
 ## 技術スタック
 - **Language**: Kotlin 2.x (Coroutines, Flow による非同期・リアクティブプログラミング)
@@ -31,12 +31,12 @@ DNS リクエストはそのリクエスト timestamp や回数などを History
     - また Service stop 時には確実にリソースを解放しリークを避ける。
 
 ### 3. DNS 処理
-- **責務**: DNS リクエストの解釈とブラックリスト判定に専念し、History 管理やブラックリスト管理は行わない。
+- **責務**: DNS クエリの解釈とブラックリスト判定に専念し、History 管理やブラックリスト管理は行わない。
 - **検索パフォーマンス**:
     - ブラックリストの判定はパケット処理ループ内で行われるため、判定ロジックは **O(1)** の計算量で実行できるよう高速なデータ構造を使用すること。
     - ただしワイルドカード判定においてはその限りではなく **Trie** 木など、なるべく高速に行えるよう配慮すること。
-- **遮断戦略**: ブロック対象のリクエストに対しては、単にパケットを破棄するのではなく、元のクエリの Transaction ID を維持し、質問セクションをコピーした上で RCODE 3 を設定した有効な DNS パケットを構築すること。
-- **UI通知**: DNS リクエストとその判定結果はイベントとして Service に通知し Service が History を更新すること。
+- **遮断戦略**: ブロック対象のクエリに対しては、単にパケットを破棄するのではなく、元のクエリの Transaction ID を維持し、質問セクションをコピーした上で RCODE 3 を設定した有効な DNS パケットを構築すること。
+- **UI通知**: DNS クエリとその判定結果はイベントとして Service に通知し Service が History を更新すること。
 - **スレッド安全性**: 
     - TUN インターフェースへの書き込み（`output.write`）は `synchronized` 等で適切に排他制御を行うこと。
     - 書き込み処理は VPN 停止（ストリームのクローズ）と競合する可能性があるため、必ず `try-catch` で保護すること。
@@ -45,19 +45,19 @@ DNS リクエストはそのリクエスト timestamp や回数などを History
     - IPv6 環境での名前解決（DNS Leak）を防ぐため、IPv6 アドレスおよび IPv6 DNS サーバーのフックを必須とする。
 
 ### 4. History 管理
-- **統計情報**: History （`DnsHistoryEntity`) には host 名 (`hostName`) と初回リクエストのタイムスタンプ (`firstTime`)、最終リクエストのタイムスタンプ (`accessTime`)、リクエスト回数 (`requestCount`) を保持する。 
+- **統計情報**: History （`DnsHistoryEntity`) には host 名 (`hostName`) と初回クエリのタイムスタンプ (`firstTime`)、最終クエリのタイムスタンプ (`accessTime`)、クエリ回数 (`requestCount`) を保持する。 
 - **保持戦略**:
     - History は永続化せず VpnService の start でクリアする。
-    - History の上限は 500 件までとし、それを超えた場合は最終リクエストの accessTime が古い順に削除する。
+    - History の上限は 500 件までとし、それを超えた場合は最終クエリの accessTime が古い順に削除する。
 
 ### 5. Blacklist 管理
-- **統計情報**: Blacklist （`BlacklistEntity`) には host 名 (`hostName`) と初回リクエストのタイムスタンプ (`firstTime`)、一時的解除 (`isPending`) を保持する。
+- **統計情報**: Blacklist （`BlacklistEntity`) には host 名 (`hostName`) と初回クエリのタイムスタンプ (`firstTime`)、一時的解除 (`isPending`) を保持する。
 - **保持戦略**: Blacklist への追加、削除があった場合はテキストファイルとして永続化し、更新があったことをイベントとして DNS 処理に通知すること。
 
 ### 6. データ管理と UI 連携
 - **リアクティブな状態管理**: 履歴やブロックリストの管理はリポジトリパターンを採用し、データの更新は `StateFlow` を通じて UI に通知すること。
 - **柔軟なソート機能**: ユーザーが通信傾向を分析できるよう、全ての統計フィールド（ホスト名、時刻、回数）において昇順・降順のソートを実装すること。
-- **通知権限**: Android 13 (API 33) 以上の通知権限 (`POST_NOTIFICATIONS`) のリクエストを適切に行う。
+- **通知権限**: Android 13 (API 33) 以上の通知権限 (`POST_NOTIFICATIONS`) のクエリを適切に行う。
 
 ## その他のルール
 - **リポジトリ操作**: add,commit,push などは指示されない限り行わない。
