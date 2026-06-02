@@ -9,8 +9,9 @@ import java.util.concurrent.ConcurrentHashMap
 class DomainTrie {
     private class Node {
         val children = ConcurrentHashMap<String, Node>()
-        var isWildcardMatch = false // ここでワイルドカード（*）による終端か
+        var isWildcardMatch = false
         var isPending = false
+        var originalPattern: String? = null // マッチした際、元のパターンを特定するために保持
     }
 
     private val root = Node()
@@ -25,6 +26,7 @@ class DomainTrie {
             if (label == "*") {
                 current.isWildcardMatch = true
                 current.isPending = isPending
+                current.originalPattern = pattern
                 return
             }
             current = current.children.getOrPut(label) { Node() }
@@ -40,11 +42,12 @@ class DomainTrie {
     }
 
     private fun removeRecursive(node: Node, labels: List<String>, index: Int): Boolean {
-        if (index == labels.size) return false // Should not happen with valid pattern
+        if (index == labels.size) return false
 
         val label = labels[index]
         if (label == "*") {
             node.isWildcardMatch = false
+            node.originalPattern = null
             return node.children.isEmpty()
         }
 
@@ -59,23 +62,30 @@ class DomainTrie {
     }
 
     /**
-     * 指定されたホスト名が登録済みの有効な（isPending=false）ワイルドカードパターンに合致するか判定する
+     * 指定されたホスト名が登録済みのワイルドカードパターンに合致するか判定する
      */
     fun matches(hostName: String): Boolean {
+        return getMatchingPattern(hostName) != null
+    }
+
+    /**
+     * 指定されたホスト名に合致するワイルドカードパターンを返す
+     */
+    fun getMatchingPattern(hostName: String): String? {
         val labels = hostName.split(".").reversed()
         var current = root
         
-        // 途中で isWildcardMatch が true かつ isPending が false になればヒット
         for (label in labels) {
-            if (current.isWildcardMatch && !current.isPending) return true
-            current = current.children[label] ?: return false
+            if (current.isWildcardMatch && !current.isPending) return current.originalPattern
+            current = current.children[label] ?: return null
         }
         
-        return current.isWildcardMatch && !current.isPending
+        return if (current.isWildcardMatch && !current.isPending) current.originalPattern else null
     }
 
     fun clear() {
         root.children.clear()
         root.isWildcardMatch = false
+        root.originalPattern = null
     }
 }
