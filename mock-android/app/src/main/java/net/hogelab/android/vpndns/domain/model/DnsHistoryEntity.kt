@@ -18,7 +18,8 @@ enum class BlockType {
     NONE,           // 未ブロック
     EXACT,          // 完全一致ブロック
     PATTERN_MATCHED, // パターン一致ブロック
-    PENDING         // リストにあるが保留中
+    PENDING,        // リストにあるが保留中
+    WHITELISTED     // ホワイトリスト登録済み
 }
 
 data class DnsHistoryEntity(

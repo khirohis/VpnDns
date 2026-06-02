@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Sort
@@ -96,6 +97,7 @@ fun HistoryScreen(
                         BlockType.EXACT -> MaterialTheme.colorScheme.error
                         BlockType.PATTERN_MATCHED -> MaterialTheme.colorScheme.tertiary
                         BlockType.PENDING -> MaterialTheme.colorScheme.outline
+                        BlockType.WHITELISTED -> MaterialTheme.colorScheme.primary
                         BlockType.NONE -> MaterialTheme.colorScheme.onSurface
                     }
 
@@ -104,7 +106,7 @@ fun HistoryScreen(
                             Text(
                                 text = entry.entity.hostName,
                                 color = color,
-                                fontWeight = if (entry.blockType != BlockType.NONE) FontWeight.Bold else FontWeight.Normal
+                                fontWeight = if (entry.blockType != BlockType.NONE && entry.blockType != BlockType.WHITELISTED) FontWeight.Bold else FontWeight.Normal
                             )
                         },
                         supportingContent = {
@@ -122,6 +124,12 @@ fun HistoryScreen(
                                 } else if (entry.blockType == BlockType.PENDING) {
                                     Text(
                                         text = "Blocking paused",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = color
+                                    )
+                                } else if (entry.blockType == BlockType.WHITELISTED) {
+                                    Text(
+                                        text = "Whitelisted",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = color
                                     )
@@ -143,13 +151,18 @@ fun HistoryScreen(
                                 }
                                 IconButton(
                                     onClick = { viewModel.toggleBlock(entry) },
-                                    enabled = entry.blockType != BlockType.PATTERN_MATCHED
+                                    enabled = entry.blockType != BlockType.PATTERN_MATCHED && entry.blockType != BlockType.WHITELISTED
                                 ) {
                                     Icon(
-                                        imageVector = if (entry.blockType == BlockType.PATTERN_MATCHED) Icons.Default.FilterAlt else Icons.Default.Block,
+                                        imageVector = when (entry.blockType) {
+                                            BlockType.PATTERN_MATCHED -> Icons.Default.FilterAlt
+                                            BlockType.WHITELISTED -> Icons.Default.CheckCircle
+                                            else -> Icons.Default.Block
+                                        },
                                         contentDescription = when (entry.blockType) {
                                             BlockType.EXACT -> "Unblock"
                                             BlockType.PATTERN_MATCHED -> "Pattern Blocked"
+                                            BlockType.WHITELISTED -> "Whitelisted"
                                             else -> "Block"
                                         },
                                         tint = if (entry.blockType != BlockType.NONE) color else MaterialTheme.colorScheme.outline

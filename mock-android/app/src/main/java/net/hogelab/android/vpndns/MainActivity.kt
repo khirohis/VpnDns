@@ -42,6 +42,7 @@ import net.hogelab.android.vpndns.data.repository.RepositoryProvider
 import net.hogelab.android.vpndns.service.VpnDnsService
 import net.hogelab.android.vpndns.ui.Screen
 import net.hogelab.android.vpndns.ui.blacklist.BlacklistScreen
+import net.hogelab.android.vpndns.ui.whitelist.WhitelistScreen
 import net.hogelab.android.vpndns.ui.bottomNavItems
 import net.hogelab.android.vpndns.ui.history.HistoryScreen
 import net.hogelab.android.vpndns.ui.theme.VpnDnsTheme
@@ -50,9 +51,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // アプリ起動時にブラックリストを非同期で読み込む
+        // アプリ起動時にブラックリストとホワイトリストを非同期で読み込む
         lifecycleScope.launch {
             RepositoryProvider.blacklistRepository.loadBlacklist(this@MainActivity)
+            RepositoryProvider.whitelistRepository.loadWhitelist(this@MainActivity)
         }
 
         enableEdgeToEdge()
@@ -148,6 +150,9 @@ fun MainScreen(
             }
             composable(Screen.Blacklist.route) {
                 BlacklistScreen()
+            }
+            composable(Screen.Whitelist.route) {
+                WhitelistScreen()
             }
             composable(Screen.Settings.route) {
                 PlaceholderScreen(Screen.Settings.title)

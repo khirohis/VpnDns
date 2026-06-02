@@ -45,16 +45,25 @@ DNS クエリはその timestamp や回数などを History 管理し、ユー�
     - IPv6 環境での名前解決（DNS Leak）を防ぐため、IPv6 アドレスおよび IPv6 DNS サーバーのフックを必須とする。
 
 ### 4. History 管理
-- **統計情報**: History （`DnsHistoryEntity`) には host 名 (`hostName`) と初回クエリのタイムスタンプ (`firstTime`)、最終クエリのタイムスタンプ (`accessTime`)、クエリ回数 (`requestCount`) を保持する。 
+- **保存情報**: History （`DnsHistoryEntity`) には host 名 (`hostName`) と初回クエリのタイムスタンプ (`firstTime`)、最終クエリのタイムスタンプ (`accessTime`)、クエリ回数 (`requestCount`) を保持する。 
 - **保持戦略**:
     - History は永続化せず VpnService の start でクリアする。
     - History の上限は 500 件までとし、それを超えた場合は最終クエリの accessTime が古い順に削除する。
+- **追加**: DNS 処理からのイベントを受け、ホストが存在しない場合はエントリーを追加し存在する場合はカウントアップし `accessTime` を更新する。 
 
 ### 5. Blacklist 管理
-- **統計情報**: Blacklist （`BlacklistEntity`) には host 名 (`hostName`) と初回クエリのタイムスタンプ (`firstTime`)、一時的解除 (`isPending`) を保持する。
+- **保存情報**: Blacklist （`BlacklistEntity`) には host 名 (`hostName`) と初回クエリのタイムスタンプ (`firstTime`)、一時的解除 (`isPending`) を保持する。
 - **保持戦略**: Blacklist への追加、削除があった場合はテキストファイルとして永続化し、更新があったことをイベントとして DNS 処理に通知すること。
+- **追加**: History から追加操作が行われた際にエントリーを追加する。
+- **削除**: Blacklist で削除操作が行える。
 
-### 6. データ管理と UI 連携
+### 6. Whitelist 管理
+- **保存情報**: Whitelist （`WhitelistEntity`) には host 名 (`hostName`) と最終更新のタイムスタンプ (`editTime`)、説明文 (`description`) を保持する。
+- **保持戦略**: Whitelist への追加、削除があった場合はテキストファイルとして保存する。
+- **追加**: Whitelist から追加が行える。また追加済みのホストはその Whitelist 登録情報をポップアップで見ることができる。
+- **編集・削除**: Whitelist の登録情報を表示するポップアップで説明文の編集およびエントリーの削除が行える。
+
+### 7. データ管理と UI 連携
 - **リアクティブな状態管理**: 履歴やブロックリストの管理はリポジトリパターンを採用し、データの更新は `StateFlow` を通じて UI に通知すること。
 - **柔軟なソート機能**: ユーザーが通信傾向を分析できるよう、全ての統計フィールド（ホスト名、時刻、回数）において昇順・降順のソートを実装すること。
 - **通知権限**: Android 13 (API 33) 以上の通知権限 (`POST_NOTIFICATIONS`) のクエリを適切に行う。
