@@ -15,6 +15,7 @@ import net.hogelab.android.vpndns.domain.model.SortField
 import net.hogelab.android.vpndns.domain.model.SortOrder
 import net.hogelab.android.vpndns.domain.repository.BlacklistRepository
 import net.hogelab.android.vpndns.domain.repository.DnsHistoryRepository
+import net.hogelab.android.vpndns.domain.repository.WhitelistRepository
 
 /**
  * UI 表示用の履歴アイテム
@@ -26,23 +27,29 @@ data class DnsHistoryUiItem(
 
 class HistoryViewModel(
     private val historyRepository: DnsHistoryRepository = RepositoryProvider.dnsRepository,
-    private val blacklistRepository: BlacklistRepository = RepositoryProvider.blacklistRepository
+    private val blacklistRepository: BlacklistRepository = RepositoryProvider.blacklistRepository,
+    private val whitelistRepository: WhitelistRepository = RepositoryProvider.whitelistRepository
 ) : ViewModel() {
 
     val sortConfig: StateFlow<HistorySortConfig> = historyRepository.sortConfig
 
-    // 履歴データとブラックリストの状態を結合して UI 用のリストを作成する
+    // 履歴データとブラックリスト・ホワイトリストの状態を結合して UI 用のリストを作成する
     val history: StateFlow<List<DnsHistoryUiItem>> = combine(
         historyRepository.history,
         blacklistRepository.blacklist,
+        whitelistRepository.whitelist,
         sortConfig
-    ) { rawHistory, blacklist, sort ->
+    ) { rawHistory, blacklist, whitelist, sort ->
         val blockedHostsMap = blacklist.associateBy { it.hostName }
+        val whitelistedHosts = whitelist.map { it.hostName }.toSet()
         
         rawHistory.asSequence().map { entity ->
             val blacklistEntry = blockedHostsMap[entity.hostName]
             
             val blockType = when {
+                whitelistedHosts.contains(entity.hostName) -> {
+                    BlockType.WHITELISTED
+                }
                 blacklistEntry != null -> {
                     if (blacklistEntry.isPending) BlockType.PENDING else BlockType.EXACT
                 }
@@ -50,15 +57,12 @@ class HistoryViewModel(
                     BlockType.PATTERN_MATCHED
                 }
                 else -> {
-                    // ここで、ワイルドカードにはマッチするが isPending=true のケースを判定したい
-                    // 現状の isBlocked は pending なら false を返すが、
-                    // 個別に「存在チェック」が必要
                     BlockType.NONE
                 }
             }
             DnsHistoryUiItem(entity, blockType)
         }.filter { item ->
-            sort.showBlocked || item.blockType == BlockType.NONE || item.blockType == BlockType.PENDING
+            sort.showBlocked || item.blockType == BlockType.NONE || item.blockType == BlockType.PENDING || item.blockType == BlockType.WHITELISTED
         }.toList()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -82,6 +86,8 @@ class HistoryViewModel(
     }
 
     fun toggleBlock(item: DnsHistoryUiItem) {
+        if (item.blockType == BlockType.WHITELISTED) return // ホワイトリスト入りはブロック不可
+
         viewModelScope.launch {
             if (item.blockType == BlockType.NONE) {
                 blacklistRepository.addToBlacklist(item.entity.hostName)
