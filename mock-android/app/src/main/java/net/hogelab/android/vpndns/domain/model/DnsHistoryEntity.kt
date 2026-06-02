@@ -11,14 +11,16 @@ enum class SortOrder {
 data class HistorySortConfig(
     val field: SortField = SortField.REQUEST_COUNT,
     val order: SortOrder = SortOrder.DESCENDING,
-    val showBlocked: Boolean = true
+    val showBlocked: Boolean = true,
+    val showWhitelisted: Boolean = true
 )
 
 enum class BlockType {
     NONE,           // 未ブロック
     EXACT,          // 完全一致ブロック
     PATTERN_MATCHED, // パターン一致ブロック
-    PENDING         // リストにあるが保留中
+    PENDING,        // リストにあるが保留中
+    WHITELISTED     // ホワイトリスト登録済み
 }
 
 data class DnsHistoryEntity(
