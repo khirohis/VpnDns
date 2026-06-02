@@ -1,9 +1,6 @@
 package net.hogelab.android.vpndns.ui.whitelist
 
 import android.app.Application
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.StateFlow
@@ -19,34 +16,8 @@ class WhitelistViewModel @JvmOverloads constructor(
 
     val whitelist: StateFlow<List<WhitelistEntity>> = repository.whitelist
 
-    var inputHostName by mutableStateOf("")
-        private set
-
-    var inputDescription by mutableStateOf("")
-        private set
-
-    fun onHostNameChange(value: String) {
-        inputHostName = value
-    }
-
-    fun onDescriptionChange(value: String) {
-        inputDescription = value
-    }
-
-    fun onAddClick() {
-        val host = inputHostName.trim()
-        if (host.isEmpty()) return
-
-        repository.addToWhitelist(host, inputDescription.trim())
-        viewModelScope.launch {
-            repository.saveWhitelist(getApplication())
-        }
-        inputHostName = ""
-        inputDescription = ""
-    }
-
-    fun updateDescription(hostName: String, description: String) {
-        repository.updateDescription(hostName, description)
+    fun updateWhitelistEntry(oldHostName: String, newHostName: String, description: String) {
+        repository.updateWhitelistEntry(oldHostName, newHostName, description)
         viewModelScope.launch {
             repository.saveWhitelist(getApplication())
         }

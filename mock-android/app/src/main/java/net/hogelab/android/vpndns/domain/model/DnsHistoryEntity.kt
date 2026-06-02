@@ -11,7 +11,8 @@ enum class SortOrder {
 data class HistorySortConfig(
     val field: SortField = SortField.REQUEST_COUNT,
     val order: SortOrder = SortOrder.DESCENDING,
-    val showBlocked: Boolean = true
+    val showBlocked: Boolean = true,
+    val showWhitelisted: Boolean = true
 )
 
 enum class BlockType {

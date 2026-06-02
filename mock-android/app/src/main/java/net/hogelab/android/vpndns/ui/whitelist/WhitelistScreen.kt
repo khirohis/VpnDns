@@ -7,12 +7,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -61,38 +59,6 @@ fun WhitelistScreen(
             )
         }
 
-        // Add Domain Area
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = viewModel.inputHostName,
-                    onValueChange = { viewModel.onHostNameChange(it) },
-                    label = { Text("Domain Name") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
-                )
-                IconButton(
-                    onClick = { viewModel.onAddClick() },
-                    enabled = viewModel.inputHostName.isNotBlank(),
-                    modifier = Modifier.padding(start = 8.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add")
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = viewModel.inputDescription,
-                onValueChange = { viewModel.onDescriptionChange(it) },
-                label = { Text("Description (Optional)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-        }
-
         HorizontalDivider()
 
         if (whitelist.isEmpty()) {
@@ -123,11 +89,11 @@ fun WhitelistScreen(
 
     // Edit/View Popup
     selectedEntity?.let { entity ->
-        WhitelistDetailDialog(
+        WhitelistEditDialog(
             entity = entity,
             onDismiss = { selectedEntity = null },
-            onSave = { _, description ->
-                viewModel.updateDescription(entity.hostName, description)
+            onSave = { oldHostName, newHostName, description ->
+                viewModel.updateWhitelistEntry(oldHostName, newHostName, description)
                 selectedEntity = null
             },
             onDelete = {
@@ -176,19 +142,28 @@ fun WhitelistEntryItem(
 }
 
 @Composable
-fun WhitelistDetailDialog(
+fun WhitelistEditDialog(
     entity: WhitelistEntity,
     onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit,
+    onSave: (String, String, String) -> Unit,
     onDelete: () -> Unit
 ) {
+    var hostName by remember { mutableStateOf(entity.hostName) }
     var description by remember { mutableStateOf(entity.description) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = entity.hostName) },
+        title = { Text(text = "Edit Whitelist Entry") },
         text = {
             Column {
+                OutlinedTextField(
+                    value = hostName,
+                    onValueChange = { hostName = it },
+                    label = { Text("Host Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.padding(vertical = 4.dp))
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
@@ -198,7 +173,10 @@ fun WhitelistDetailDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onSave(entity.hostName, description) }) {
+            Button(
+                onClick = { onSave(entity.hostName, hostName, description) },
+                enabled = hostName.isNotBlank()
+            ) {
                 Text("Save")
             }
         },

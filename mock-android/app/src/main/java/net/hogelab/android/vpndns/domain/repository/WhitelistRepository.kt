@@ -19,14 +19,19 @@ interface WhitelistRepository {
     fun addToWhitelist(hostName: String, description: String = "")
 
     /**
-     * 説明文を更新する
+     * ホワイトリストのエントリーを更新する
      */
-    fun updateDescription(hostName: String, description: String)
+    fun updateWhitelistEntry(oldHostName: String, newHostName: String, description: String)
 
     /**
      * ホワイトリストから削除する
      */
     fun removeFromWhitelist(hostName: String)
+
+    /**
+     * 指定されたホスト名がホワイトリスト（ワイルドカード含む）に合致するか判定し、そのエントリーを返す
+     */
+    fun findMatchingEntry(hostName: String): WhitelistEntity?
 
     /**
      * 指定されたホストがホワイトリスト登録されているか判定する

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import net.hogelab.android.vpndns.data.repository.util.DomainTrie
 import net.hogelab.android.vpndns.domain.model.WhitelistEntity
 import net.hogelab.android.vpndns.domain.repository.WhitelistRepository
 import java.io.File
@@ -19,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
 class InMemoryWhitelistRepository : WhitelistRepository {
 
     private val whitelistMap = ConcurrentHashMap<String, WhitelistEntity>()
+    private val wildcardTrie = DomainTrie()
     private val _rawWhitelist = MutableStateFlow<List<WhitelistEntity>>(emptyList())
 
     private val loadMutex = Mutex()
@@ -34,27 +36,60 @@ class InMemoryWhitelistRepository : WhitelistRepository {
             editTime = System.currentTimeMillis(),
             description = description
         )
+        
+        if (hostName.contains("*")) {
+            wildcardTrie.insert(hostName)
+        }
 
         updateWhitelist()
     }
 
-    override fun updateDescription(hostName: String, description: String) {
-        val entry = whitelistMap[hostName] ?: return
-        whitelistMap[hostName] = entry.copy(
-            description = description,
-            editTime = System.currentTimeMillis()
-        )
+    override fun updateWhitelistEntry(oldHostName: String, newHostName: String, description: String) {
+        if (oldHostName == newHostName) {
+            val entry = whitelistMap[oldHostName] ?: return
+            whitelistMap[oldHostName] = entry.copy(
+                description = description,
+                editTime = System.currentTimeMillis()
+            )
+        } else {
+            whitelistMap.remove(oldHostName)
+            if (oldHostName.contains("*")) {
+                wildcardTrie.remove(oldHostName)
+            }
+            
+            whitelistMap[newHostName] = WhitelistEntity(
+                hostName = newHostName,
+                editTime = System.currentTimeMillis(),
+                description = description
+            )
+            if (newHostName.contains("*")) {
+                wildcardTrie.insert(newHostName)
+            }
+        }
         updateWhitelist()
     }
 
     override fun removeFromWhitelist(hostName: String) {
         if (whitelistMap.remove(hostName) != null) {
+            if (hostName.contains("*")) {
+                wildcardTrie.remove(hostName)
+            }
             updateWhitelist()
         }
     }
 
     override fun isWhitelisted(hostName: String): Boolean {
-        return whitelistMap.containsKey(hostName)
+        return findMatchingEntry(hostName) != null
+    }
+
+    override fun findMatchingEntry(hostName: String): WhitelistEntity? {
+        // 完全一致を優先
+        val exactMatch = whitelistMap[hostName]
+        if (exactMatch != null) return exactMatch
+        
+        // ワイルドカードマッチ
+        val pattern = wildcardTrie.getMatchingPattern(hostName)
+        return if (pattern != null) whitelistMap[pattern] else null
     }
 
     override suspend fun saveWhitelist(context: Context) = withContext(Dispatchers.IO) {
@@ -81,6 +116,7 @@ class InMemoryWhitelistRepository : WhitelistRepository {
                     if (file.exists()) {
                         val lines = file.readLines()
                         whitelistMap.clear()
+                        wildcardTrie.clear()
                         lines.forEach { line ->
                             val parts = line.split(",")
                             if (parts.size >= 2) {
@@ -90,6 +126,10 @@ class InMemoryWhitelistRepository : WhitelistRepository {
 
                                 val entity = WhitelistEntity(hostName, editTime, description)
                                 whitelistMap[hostName] = entity
+                                
+                                if (hostName.contains("*")) {
+                                    wildcardTrie.insert(hostName)
+                                }
                             }
                         }
                         updateWhitelist()
